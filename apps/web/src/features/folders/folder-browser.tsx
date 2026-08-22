@@ -196,7 +196,7 @@ export function FolderBrowser({ rootFolderId }: { rootFolderId: string }) {
   }
 
   return (
-    <section className="surface-panel overflow-hidden text-card-foreground">
+    <section className="surface-panel relative z-10 overflow-visible text-card-foreground">
       <div className="border-b border-border/70 bg-surface/75 px-5 py-5 sm:px-7">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -207,25 +207,30 @@ export function FolderBrowser({ rootFolderId }: { rootFolderId: string }) {
               <FolderOpen className="h-5 w-5 text-primary" aria-hidden="true" />
               {title}
             </h2>
-            <nav
-              className="mt-3 flex flex-wrap items-center gap-1 text-sm text-muted-foreground"
-              aria-label="Folder path"
-            >
-              {breadcrumbs.map((crumb, index) => (
-                <span key={crumb.id} className="inline-flex items-center gap-1">
-                  {index > 0 ? (
-                    <ChevronRight className="h-3.5 w-3.5 opacity-40" />
-                  ) : null}
-                  <button
-                    type="button"
-                    className="rounded-md px-1 font-medium transition-colors hover:bg-accent hover:text-ink"
-                    onClick={() => openFolder(crumb.id)}
+            {breadcrumbs.length > 1 ? (
+              <nav
+                className="mt-3 flex flex-wrap items-center gap-1 text-sm text-muted-foreground"
+                aria-label="Folder path"
+              >
+                {breadcrumbs.slice(0, -1).map((crumb, index) => (
+                  <span
+                    key={crumb.id}
+                    className="inline-flex items-center gap-1"
                   >
-                    {crumb.name}
-                  </button>
-                </span>
-              ))}
-            </nav>
+                    {index > 0 ? (
+                      <ChevronRight className="h-3.5 w-3.5 opacity-40" />
+                    ) : null}
+                    <button
+                      type="button"
+                      className="rounded-md px-1 font-medium transition-colors hover:bg-accent hover:text-ink"
+                      onClick={() => openFolder(crumb.id)}
+                    >
+                      {crumb.name}
+                    </button>
+                  </span>
+                ))}
+              </nav>
+            ) : null}
           </div>
           {canWrite ? (
             <div className="flex flex-wrap gap-2">
@@ -363,11 +368,11 @@ export function FolderBrowser({ rootFolderId }: { rootFolderId: string }) {
                 </p>
               </div>
             ) : (
-              <ul className="mt-3 divide-y divide-border/70 overflow-hidden rounded-2xl border border-border/80 bg-surface/60">
+              <ul className="mt-3 divide-y divide-border/70 overflow-visible rounded-2xl border border-border/80 bg-surface/60">
                 {listedFolders.map((folder) => (
                   <li
                     key={folder.id}
-                    className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between"
+                    className="relative z-10 flex flex-col gap-3 px-4 py-3.5 first:rounded-t-2xl last:rounded-b-2xl sm:flex-row sm:items-center sm:justify-between"
                   >
                     <button
                       type="button"
@@ -462,11 +467,11 @@ export function FolderBrowser({ rootFolderId }: { rootFolderId: string }) {
                 </p>
               </div>
             ) : (
-              <ul className="mt-3 divide-y divide-border/70 overflow-hidden rounded-2xl border border-border/80 bg-surface/60">
+              <ul className="mt-3 divide-y divide-border/70 overflow-visible rounded-2xl border border-border/80 bg-surface/60">
                 {listedFiles.map((file) => (
                   <li
                     key={file.id}
-                    className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between"
+                    className="relative z-10 flex flex-col gap-3 px-4 py-3.5 first:rounded-t-2xl last:rounded-b-2xl sm:flex-row sm:items-center sm:justify-between"
                   >
                     <div className="flex items-center gap-3">
                       <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-xs font-semibold text-primary">

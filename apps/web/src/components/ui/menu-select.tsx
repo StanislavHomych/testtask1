@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Check, ChevronDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -27,8 +28,32 @@ export function MenuSelect({
   onSelect,
 }: MenuSelectProps) {
   const [open, setOpen] = useState(false)
-  const rootRef = useRef<HTMLDivElement>(null)
+  const [coords, setCoords] = useState({ top: 0, left: 0, width: 256 })
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const listId = useId()
+
+  function updatePosition() {
+    const trigger = triggerRef.current
+    if (!trigger) {
+      return
+    }
+    const rect = trigger.getBoundingClientRect()
+    const width = 272
+    const left = Math.min(
+      Math.max(12, rect.right - width),
+      window.innerWidth - width - 12,
+    )
+    const top = rect.bottom + 8
+    setCoords({ top, left, width })
+  }
+
+  useLayoutEffect(() => {
+    if (!open) {
+      return
+    }
+    updatePosition()
+  }, [open])
 
   useEffect(() => {
     if (!open) {
@@ -36,9 +61,14 @@ export function MenuSelect({
     }
 
     function onPointerDown(event: MouseEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) {
-        setOpen(false)
+      const target = event.target as Node
+      if (
+        triggerRef.current?.contains(target) ||
+        menuRef.current?.contains(target)
+      ) {
+        return
       }
+      setOpen(false)
     }
 
     function onKeyDown(event: KeyboardEvent) {
@@ -49,15 +79,20 @@ export function MenuSelect({
 
     window.addEventListener('mousedown', onPointerDown)
     window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('resize', updatePosition)
+    window.addEventListener('scroll', updatePosition, true)
     return () => {
       window.removeEventListener('mousedown', onPointerDown)
       window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('resize', updatePosition)
+      window.removeEventListener('scroll', updatePosition, true)
     }
   }, [open])
 
   return (
-    <div ref={rootRef} className="relative">
+    <div className="relative z-20">
       <Button
+        ref={triggerRef}
         type="button"
         size="sm"
         variant="outline"
@@ -71,53 +106,62 @@ export function MenuSelect({
         <ChevronDown className="ml-1.5 h-3.5 w-3.5 opacity-70" />
       </Button>
 
-      {open ? (
-        <div
-          id={listId}
-          role="listbox"
-          aria-label={placeholder}
-          className="absolute right-0 z-40 mt-2 w-64 overflow-hidden rounded-2xl border border-border/80 bg-[color:var(--card)] p-1.5 shadow-[0_18px_40px_-24px_rgba(15,28,22,0.55)]"
-        >
-          <p className="px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-            {placeholder}
-          </p>
-          {options.length === 0 ? (
-            <p className="px-3 py-3 text-sm text-muted-foreground">
-              {emptyMessage}
-            </p>
-          ) : (
-            <ul className="max-h-64 overflow-auto">
-              {options.map((option) => (
-                <li key={option.value}>
-                  <button
-                    type="button"
-                    role="option"
-                    className={cn(
-                      'flex w-full items-start gap-2 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-accent',
-                    )}
-                    onClick={() => {
-                      setOpen(false)
-                      onSelect(option.value)
-                    }}
-                  >
-                    <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary opacity-0" />
-                    <span>
-                      <span className="block text-sm font-semibold text-ink">
-                        {option.label}
-                      </span>
-                      {option.description ? (
-                        <span className="mt-0.5 block text-xs text-muted-foreground">
-                          {option.description}
+      {open && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              ref={menuRef}
+              id={listId}
+              role="listbox"
+              aria-label={placeholder}
+              style={{
+                top: coords.top,
+                left: coords.left,
+                width: coords.width,
+              }}
+              className="fixed z-[80] overflow-hidden rounded-2xl border border-border/80 bg-[color:var(--card)] p-1.5 shadow-[0_24px_50px_-20px_rgba(15,28,22,0.5)]"
+            >
+              <p className="px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                {placeholder}
+              </p>
+              {options.length === 0 ? (
+                <p className="px-3 py-3 text-sm text-muted-foreground">
+                  {emptyMessage}
+                </p>
+              ) : (
+                <ul className="max-h-64 overflow-auto">
+                  {options.map((option) => (
+                    <li key={option.value}>
+                      <button
+                        type="button"
+                        role="option"
+                        className={cn(
+                          'flex w-full items-start gap-2 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-accent',
+                        )}
+                        onClick={() => {
+                          setOpen(false)
+                          onSelect(option.value)
+                        }}
+                      >
+                        <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary opacity-0" />
+                        <span>
+                          <span className="block text-sm font-semibold text-ink">
+                            {option.label}
+                          </span>
+                          {option.description ? (
+                            <span className="mt-0.5 block text-xs text-muted-foreground">
+                              {option.description}
+                            </span>
+                          ) : null}
                         </span>
-                      ) : null}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      ) : null}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   )
 }
