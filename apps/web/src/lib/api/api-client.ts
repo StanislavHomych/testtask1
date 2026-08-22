@@ -2,6 +2,10 @@ import { ApiError } from './api-error'
 
 const apiUrl = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api'
 
+export function getApiBaseUrl(): string {
+  return apiUrl
+}
+
 export interface ApiRequestOptions extends RequestInit {
   token?: string | null
 }

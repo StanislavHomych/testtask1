@@ -105,6 +105,21 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
     return { url, expiresInSeconds: DOWNLOAD_URL_TTL_SECONDS };
   }
 
+  async putObject(
+    objectKey: string,
+    body: Buffer,
+    contentType: string,
+  ): Promise<void> {
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: objectKey,
+        Body: body,
+        ContentType: contentType,
+      }),
+    );
+  }
+
   async objectExists(objectKey: string): Promise<boolean> {
     try {
       await this.client.send(

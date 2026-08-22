@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -8,8 +9,12 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
   ApiNoContentResponse,
@@ -41,6 +46,29 @@ export class FilesController {
     @Body() dto: CreateUploadUrlDto,
   ) {
     return this.filesService.createUploadUrl(user.clerkUserId, dto);
+  }
+
+  @Put(':id/content')
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 50 * 1024 * 1024 } }),
+  )
+  @ApiOperation({
+    summary: 'Upload PDF bytes through the API (used when browser S3 CORS is blocked)',
+  })
+  uploadContent(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile() file?: { buffer: Buffer; mimetype: string },
+  ) {
+    if (!file?.buffer) {
+      throw new BadRequestException('file is required');
+    }
+    return this.filesService.uploadContent(
+      user.clerkUserId,
+      id,
+      file.buffer,
+      file.mimetype,
+    );
   }
 
   @Post(':id/complete')

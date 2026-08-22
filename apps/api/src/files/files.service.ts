@@ -106,6 +106,35 @@ export class FilesService {
     };
   }
 
+  async uploadContent(
+    clerkUserId: string,
+    fileId: string,
+    body: Buffer,
+    mimeType: string,
+  ): Promise<FileResponse> {
+    const user = await this.usersService.ensureLocalUser(clerkUserId);
+    const file = await this.findFileOrThrow(fileId);
+    await this.assertCanWriteFolder(user.id, file.folderId);
+
+    if (
+      file.status !== FileStatus.PENDING_UPLOAD &&
+      file.status !== FileStatus.FAILED
+    ) {
+      throw new BadRequestException('File is not awaiting upload');
+    }
+    if (mimeType !== PDF_MIME && mimeType !== 'application/octet-stream') {
+      throw new BadRequestException('Only PDF uploads are supported');
+    }
+    if (body.byteLength !== Number(file.size)) {
+      throw new BadRequestException(
+        'Uploaded bytes do not match the declared file size',
+      );
+    }
+
+    await this.storage.putObject(file.storageKey, body, PDF_MIME);
+    return this.completeUpload(clerkUserId, fileId, {});
+  }
+
   async completeUpload(
     clerkUserId: string,
     fileId: string,

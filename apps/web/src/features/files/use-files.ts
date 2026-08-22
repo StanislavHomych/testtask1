@@ -1,4 +1,6 @@
+import { useAuth } from '@clerk/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { getApiBaseUrl } from '@/lib/api/api-client'
 import { useApiRequest } from '@/lib/api/use-api-request'
 import type {
   FileSummary,
@@ -9,6 +11,7 @@ import { folderKeys } from '@/features/folders/use-folders'
 
 export function useUploadPdf(folderId: string) {
   const request = useApiRequest()
+  const { getToken } = useAuth()
   const queryClient = useQueryClient()
 
   return useMutation({
@@ -23,19 +26,30 @@ export function useUploadPdf(folderId: string) {
         }),
       })
 
-      const uploadResponse = await fetch(prepared.uploadUrl, {
-        method: 'PUT',
-        body: file,
-      })
+      const token = await getToken()
+      if (!token) {
+        throw new Error('Missing Clerk session token')
+      }
+
+      const form = new FormData()
+      form.append('file', file, file.name)
+
+      const uploadResponse = await fetch(
+        `${getApiBaseUrl()}/files/${prepared.file.id}/content`,
+        {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          body: form,
+        },
+      )
 
       if (!uploadResponse.ok) {
         throw new Error('Failed to upload file to storage')
       }
 
-      return request<FileSummary>(`/files/${prepared.file.id}/complete`, {
-        method: 'POST',
-        body: JSON.stringify({}),
-      })
+      return (await uploadResponse.json()) as FileSummary
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({

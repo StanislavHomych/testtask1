@@ -33,7 +33,12 @@ try {
           {
             AllowedHeaders: ['*'],
             AllowedMethods: ['GET', 'PUT', 'HEAD'],
-            AllowedOrigins: [frontendOrigin, 'http://127.0.0.1:5173'],
+            AllowedOrigins: [
+              frontendOrigin,
+              'http://localhost:5173',
+              'http://127.0.0.1:5173',
+              'https://testtask1-web.vercel.app',
+            ],
             ExposeHeaders: ['ETag', 'Content-Length', 'Content-Type'],
             MaxAgeSeconds: 3000,
           },
