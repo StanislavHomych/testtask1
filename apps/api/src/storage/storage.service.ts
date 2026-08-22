@@ -34,6 +34,9 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
         accessKeyId: config.getOrThrow<string>('AWS_ACCESS_KEY_ID'),
         secretAccessKey: config.getOrThrow<string>('AWS_SECRET_ACCESS_KEY'),
       },
+      // Browser PUTs cannot replay SDK-default CRC32 checksums in the signature.
+      requestChecksumCalculation: 'WHEN_REQUIRED',
+      responseChecksumValidation: 'WHEN_REQUIRED',
       ...(endpoint
         ? {
             endpoint,
