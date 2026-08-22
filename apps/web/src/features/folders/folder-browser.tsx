@@ -1,4 +1,12 @@
 import { useMemo, useRef, useState } from 'react'
+import {
+  ChevronRight,
+  FileText,
+  FileUp,
+  Folder,
+  FolderOpen,
+  FolderPlus,
+} from 'lucide-react'
 import { PdfPreview } from '@/components/pdf-preview'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -16,7 +24,6 @@ import {
   useRenameFile,
   useUploadPdf,
 } from '@/features/files/use-files'
-import { SharePanel } from '@/features/sharing/share-panel'
 import { ApiError } from '@/lib/api/api-error'
 import { useApiRequest } from '@/lib/api/use-api-request'
 import type {
@@ -44,13 +51,12 @@ const selectClassName =
 
 export function FolderBrowser({
   rootFolderId,
-  canManageShares,
 }: {
   rootFolderId: string
-  canManageShares: boolean
 }) {
   const [folderId, setFolderId] = useState(rootFolderId)
   const [newFolderName, setNewFolderName] = useState('')
+  const [showNewFolder, setShowNewFolder] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [extraFolders, setExtraFolders] = useState<FolderSummary[]>([])
   const [extraFiles, setExtraFiles] = useState<FileSummary[]>([])
@@ -136,16 +142,26 @@ export function FolderBrowser({
   }
 
   return (
-    <section className="surface-panel p-5 text-card-foreground sm:p-7">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <section className="surface-panel overflow-hidden text-card-foreground">
+      <div className="border-b border-border/70 bg-surface/75 px-5 py-5 sm:px-7">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="font-display text-2xl font-semibold tracking-tight text-ink">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            Current folder
+          </p>
+          <h2 className="mt-1 flex items-center gap-2 font-display text-2xl font-semibold tracking-tight text-ink">
+            <FolderOpen className="h-5 w-5 text-primary" aria-hidden="true" />
             {title}
           </h2>
-          <nav className="mt-3 flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
+          <nav
+            className="mt-3 flex flex-wrap items-center gap-1 text-sm text-muted-foreground"
+            aria-label="Folder path"
+          >
             {breadcrumbs.map((crumb, index) => (
               <span key={crumb.id} className="inline-flex items-center gap-1">
-                {index > 0 ? <span className="opacity-40">/</span> : null}
+                {index > 0 ? (
+                  <ChevronRight className="h-3.5 w-3.5 opacity-40" />
+                ) : null}
                 <button
                   type="button"
                   className="rounded-md px-1 font-medium transition-colors hover:bg-accent hover:text-ink"
@@ -163,9 +179,18 @@ export function FolderBrowser({
               type="button"
               variant="outline"
               size="sm"
+              onClick={() => setShowNewFolder((value) => !value)}
+            >
+              <FolderPlus className="mr-1.5 h-4 w-4" aria-hidden="true" />
+              New folder
+            </Button>
+            <Button
+              type="button"
+              size="sm"
               disabled={uploadPdf.isPending}
               onClick={() => fileInputRef.current?.click()}
             >
+              <FileUp className="mr-1.5 h-4 w-4" aria-hidden="true" />
               {uploadPdf.isPending ? 'Uploading…' : 'Upload PDF'}
             </Button>
             <input
@@ -186,11 +211,12 @@ export function FolderBrowser({
             />
           </div>
         ) : null}
+        </div>
       </div>
 
-      {canWrite ? (
+      {canWrite && showNewFolder ? (
         <form
-          className="mt-5 flex flex-col gap-2 sm:flex-row"
+          className="flex flex-col gap-3 border-b border-border/70 bg-accent/25 px-5 py-4 sm:flex-row sm:items-center sm:px-7"
           onSubmit={(event) => {
             event.preventDefault()
             const name = newFolderName.trim()
@@ -200,40 +226,70 @@ export function FolderBrowser({
             void run(async () => {
               await createFolder.mutateAsync(name)
               setNewFolderName('')
+              setShowNewFolder(false)
             })
           }}
         >
           <Input
-            placeholder="New folder name"
+            placeholder="e.g. Financial documents"
             value={newFolderName}
             onChange={(event) => setNewFolderName(event.target.value)}
           />
           <Button type="submit" disabled={createFolder.isPending}>
             {createFolder.isPending ? 'Creating…' : 'Create folder'}
           </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => {
+              setNewFolderName('')
+              setShowNewFolder(false)
+            }}
+          >
+            Cancel
+          </Button>
         </form>
       ) : null}
 
-      {error ? <p className="mt-4 text-sm text-[#9b2c2c]">{error}</p> : null}
+      {error ? (
+        <div className="mx-5 mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-[#9b2c2c] sm:mx-7">
+          {error}
+        </div>
+      ) : null}
 
       {contents.isPending ? (
-        <p className="mt-8 text-sm text-muted-foreground">Loading contents…</p>
+        <p className="px-7 py-12 text-center text-sm text-muted-foreground">
+          Loading documents…
+        </p>
       ) : null}
 
       {contents.isError ? (
-        <p className="mt-8 text-sm text-muted-foreground">
+        <p className="px-7 py-12 text-center text-sm text-muted-foreground">
           Could not load this folder.
         </p>
       ) : null}
 
       {contents.data ? (
-        <div className="mt-8 space-y-8">
+        <div className="space-y-8 px-5 py-6 sm:px-7 sm:py-7">
           <div>
-            <h3 className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-              Folders
-            </h3>
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="font-display text-lg font-semibold text-ink">
+                Folders
+              </h3>
+              <span className="text-xs font-medium text-muted-foreground">
+                {listedFolders.length} shown
+              </span>
+            </div>
             {listedFolders.length === 0 ? (
-              <p className="mt-3 text-sm text-muted-foreground">No folders.</p>
+              <div className="mt-3 rounded-2xl border border-dashed border-border bg-surface/45 px-5 py-7 text-center">
+                <Folder className="mx-auto h-6 w-6 text-muted-foreground/60" />
+                <p className="mt-2 text-sm font-medium text-ink">
+                  No folders here
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Create one to group related documents.
+                </p>
+              </div>
             ) : (
               <ul className="mt-3 divide-y divide-border/70 overflow-hidden rounded-2xl border border-border/80 bg-surface/60">
                 {listedFolders.map((folder) => (
@@ -247,7 +303,7 @@ export function FolderBrowser({
                       onClick={() => openFolder(folder.id)}
                     >
                       <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-xs font-semibold text-accent-foreground">
-                        DIR
+                        <Folder className="h-4 w-4" aria-hidden="true" />
                       </span>
                       <span className="font-medium text-ink hover:underline">
                         {folder.name}
@@ -348,11 +404,26 @@ export function FolderBrowser({
           </div>
 
           <div>
-            <h3 className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-              Files
-            </h3>
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="font-display text-lg font-semibold text-ink">
+                PDF documents
+              </h3>
+              <span className="text-xs font-medium text-muted-foreground">
+                {listedFiles.length} shown
+              </span>
+            </div>
             {listedFiles.length === 0 ? (
-              <p className="mt-3 text-sm text-muted-foreground">No files.</p>
+              <div className="mt-3 rounded-2xl border border-dashed border-border bg-surface/45 px-5 py-8 text-center">
+                <FileText className="mx-auto h-7 w-7 text-muted-foreground/60" />
+                <p className="mt-2 text-sm font-medium text-ink">
+                  No PDF documents yet
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {canWrite
+                    ? 'Use “Upload PDF” above to add the first document.'
+                    : 'The owner has not added documents to this folder.'}
+                </p>
+              </div>
             ) : (
               <ul className="mt-3 divide-y divide-border/70 overflow-hidden rounded-2xl border border-border/80 bg-surface/60">
                 {listedFiles.map((file) => (
@@ -362,7 +433,7 @@ export function FolderBrowser({
                   >
                     <div className="flex items-center gap-3">
                       <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-xs font-semibold text-primary">
-                        PDF
+                        <FileText className="h-4 w-4" aria-hidden="true" />
                       </span>
                       <div>
                         <p className="font-medium text-ink">{file.name}</p>
@@ -482,19 +553,23 @@ export function FolderBrowser({
           </div>
 
           {preview ? (
-            <div>
-              <h3 className="mb-3 font-display text-lg font-semibold text-ink">
-                Preview · {preview.title}
-              </h3>
+            <div className="border-t border-border/70 pt-7">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 className="font-display text-lg font-semibold text-ink">
+                  Preview · {preview.title}
+                </h3>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setPreview(null)}
+                >
+                  Close preview
+                </Button>
+              </div>
               <PdfPreview url={preview.url} title={preview.title} />
             </div>
           ) : null}
-        </div>
-      ) : null}
-
-      {canManageShares ? (
-        <div className="mt-10 border-t border-border/80 pt-8">
-          <SharePanel resourceType="FOLDER" resourceId={folderId} />
         </div>
       ) : null}
     </section>

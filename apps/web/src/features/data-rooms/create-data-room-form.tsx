@@ -24,9 +24,16 @@ export function CreateDataRoomForm() {
       })}
     >
       <div>
+        <label
+          htmlFor="data-room-name"
+          className="mb-2 block text-sm font-semibold text-ink"
+        >
+          Room name
+        </label>
         <Input
-          placeholder="Acme diligence"
-          aria-label="Data room name"
+          id="data-room-name"
+          placeholder="e.g. Acme Series A"
+          autoComplete="off"
           {...form.register('name')}
         />
         {form.formState.errors.name ? (
@@ -35,9 +42,12 @@ export function CreateDataRoomForm() {
           </p>
         ) : null}
       </div>
-      <Button type="submit" disabled={createDataRoom.isPending}>
-        {createDataRoom.isPending ? 'Creating…' : 'Create data room'}
+      <Button className="w-full" type="submit" disabled={createDataRoom.isPending}>
+        {createDataRoom.isPending ? 'Creating room…' : 'Create room'}
       </Button>
+      <p className="text-xs leading-relaxed text-muted-foreground">
+        A private root folder is created automatically.
+      </p>
     </form>
   )
 }

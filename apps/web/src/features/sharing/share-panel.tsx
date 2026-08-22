@@ -42,56 +42,78 @@ export function SharePanel({
     <div>
       <h3 className="font-display text-xl font-semibold text-ink">{title}</h3>
       <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-        Invite a signed-in teammate by email, or create a read-only public link.
-        You can revoke either at any time.
+        Choose how people should get read-only access. You stay in control and
+        can revoke access at any time.
       </p>
 
-      <form
-        className="mt-5 flex flex-col gap-2 sm:flex-row"
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (!email.trim()) {
-            return
-          }
-          void run(async () => {
-            await createShare.mutateAsync({
-              audience: 'USER',
-              email: email.trim(),
-            })
-            setEmail('')
-          })
-        }}
-      >
-        <Input
-          type="email"
-          placeholder="colleague@example.com"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-        />
-        <Button type="submit" disabled={createShare.isPending}>
-          Share with user
-        </Button>
-      </form>
-
-      <div className="mt-3">
-        <Button
-          type="button"
-          variant="outline"
-          disabled={createShare.isPending}
-          onClick={() => {
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        <form
+          className="rounded-2xl border border-border/80 bg-surface/60 p-5"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (!email.trim()) {
+              return
+            }
             void run(async () => {
-              const share = await createShare.mutateAsync({
-                audience: 'PUBLIC',
+              await createShare.mutateAsync({
+                audience: 'USER',
+                email: email.trim(),
               })
-              if (share.publicToken) {
-                const url = `${window.location.origin}/shared/${share.publicToken}`
-                setCreatedPublicLink(url)
-              }
+              setEmail('')
             })
           }}
         >
-          Create public link
-        </Button>
+          <p className="font-semibold text-ink">Invite a teammate</p>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            Best when you know who needs access. They must have signed in once.
+          </p>
+          <label
+            htmlFor={`share-email-${resourceId}`}
+            className="mt-4 mb-2 block text-xs font-semibold text-ink"
+          >
+            Teammate email
+          </label>
+          <Input
+            id={`share-email-${resourceId}`}
+            type="email"
+            placeholder="colleague@example.com"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+          />
+          <Button
+            className="mt-3 w-full"
+            type="submit"
+            disabled={createShare.isPending}
+          >
+            {createShare.isPending ? 'Sharing…' : 'Invite viewer'}
+          </Button>
+        </form>
+
+        <div className="rounded-2xl border border-border/80 bg-surface/60 p-5">
+          <p className="font-semibold text-ink">Create a public link</p>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            Anyone with the link can view this room. No sign-in required.
+          </p>
+          <Button
+            className="mt-4 w-full"
+            type="button"
+            variant="outline"
+            disabled={createShare.isPending}
+            onClick={() => {
+              void run(async () => {
+                const share = await createShare.mutateAsync({
+                  audience: 'PUBLIC',
+                })
+                if (share.publicToken) {
+                  const url = `${window.location.origin}/shared/${share.publicToken}`
+                  setCreatedPublicLink(url)
+                }
+              })
+            }}
+          >
+            Generate read-only link
+          </Button>
+        </div>
       </div>
 
       {createdPublicLink ? (
@@ -123,7 +145,15 @@ export function SharePanel({
 
       {error ? <p className="mt-3 text-sm text-[#9b2c2c]">{error}</p> : null}
 
-      <ul className="mt-5 divide-y divide-border/70 overflow-hidden rounded-2xl border border-border/80 bg-surface/60">
+      <div className="mt-8 flex items-center justify-between gap-3">
+        <h4 className="font-display text-lg font-semibold text-ink">
+          People and links with access
+        </h4>
+        <span className="text-xs font-medium text-muted-foreground">
+          {(shares.data?.items ?? []).length} active
+        </span>
+      </div>
+      <ul className="mt-3 divide-y divide-border/70 overflow-hidden rounded-2xl border border-border/80 bg-surface/60">
         {(shares.data?.items ?? []).map((share) => (
           <li
             key={share.id}
