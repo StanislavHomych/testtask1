@@ -76,14 +76,13 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
 
   async createUploadUrl(
     objectKey: string,
-    contentType: string,
+    _contentType: string,
   ): Promise<{ url: string; expiresInSeconds: number }> {
     const url = await getSignedUrl(
       this.client,
       new PutObjectCommand({
         Bucket: this.bucket,
         Key: objectKey,
-        ContentType: contentType,
       }),
       { expiresIn: UPLOAD_URL_TTL_SECONDS },
     );

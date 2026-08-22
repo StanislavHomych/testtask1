@@ -25,9 +25,6 @@ export function useUploadPdf(folderId: string) {
 
       const uploadResponse = await fetch(prepared.uploadUrl, {
         method: 'PUT',
-        headers: {
-          'Content-Type': file.type || 'application/pdf',
-        },
         body: file,
       })
 
