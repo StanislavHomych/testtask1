@@ -1,0 +1,138 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ResourceType {
+  DATA_ROOM
+  FOLDER
+  FILE
+}
+
+enum ShareRole {
+  VIEWER
+  EDITOR
+}
+
+enum ResourceStatus {
+  ACTIVE
+  DELETING
+  DELETED
+}
+
+enum FileStatus {
+  PENDING_UPLOAD
+  AVAILABLE
+  FAILED
+  DELETING
+  DELETED
+}
+
+model User {
+  id          String   @id @default(uuid()) @db.Uuid
+  clerkUserId String   @unique
+  email       String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ownedDataRooms DataRoom[] @relation("DataRoomOwner")
+  uploadedFiles  File[]     @relation("FileUploader")
+  receivedShares Share[]    @relation("ShareRecipient")
+  createdShares  Share[]    @relation("ShareCreator")
+
+  @@index([email])
+}
+
+model DataRoom {
+  id        String         @id @default(uuid()) @db.Uuid
+  name      String
+  ownerId   String         @db.Uuid
+  status    ResourceStatus @default(ACTIVE)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  deletedAt DateTime?
+
+  owner   User     @relation("DataRoomOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  folders Folder[]
+  shares  Share[]  @relation("SharedDataRoom")
+
+  @@index([ownerId, status, createdAt, id])
+}
+
+model Folder {
+  id         String         @id @default(uuid()) @db.Uuid
+  name       String
+  nameKey    String
+  dataRoomId String         @db.Uuid
+  parentId   String?        @db.Uuid
+  status     ResourceStatus @default(ACTIVE)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  deletedAt  DateTime?
+
+  dataRoom DataRoom @relation(fields: [dataRoomId], references: [id], onDelete: Cascade)
+  parent   Folder?  @relation("FolderTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children Folder[] @relation("FolderTree")
+  files    File[]
+  shares   Share[]  @relation("SharedFolder")
+
+  @@unique([dataRoomId, parentId, nameKey])
+  @@index([dataRoomId, parentId, status, nameKey, id])
+  @@index([parentId])
+}
+
+model File {
+  id           String     @id @default(uuid()) @db.Uuid
+  name         String
+  nameKey      String
+  originalName String
+  mimeType     String
+  size         BigInt
+  storageKey   String     @unique
+  folderId     String     @db.Uuid
+  uploadedById String     @db.Uuid
+  status       FileStatus @default(PENDING_UPLOAD)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  deletedAt    DateTime?
+
+  folder     Folder  @relation(fields: [folderId], references: [id], onDelete: Restrict)
+  uploadedBy User    @relation("FileUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+  shares     Share[] @relation("SharedFile")
+
+  @@unique([folderId, nameKey])
+  @@index([folderId, status, nameKey, id])
+  @@index([uploadedById])
+}
+
+model Share {
+  id           String       @id @default(uuid()) @db.Uuid
+  resourceType ResourceType
+  dataRoomId   String?      @db.Uuid
+  folderId     String?      @db.Uuid
+  fileId       String?      @db.Uuid
+  userId       String?      @db.Uuid
+  publicToken  String?      @unique
+  role         ShareRole    @default(VIEWER)
+  createdById  String       @db.Uuid
+  createdAt    DateTime     @default(now())
+  expiresAt    DateTime?
+  revokedAt    DateTime?
+
+  dataRoom  DataRoom? @relation("SharedDataRoom", fields: [dataRoomId], references: [id], onDelete: Cascade)
+  folder    Folder?   @relation("SharedFolder", fields: [folderId], references: [id], onDelete: Cascade)
+  file      File?     @relation("SharedFile", fields: [fileId], references: [id], onDelete: Cascade)
+  user      User?     @relation("ShareRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  createdBy User      @relation("ShareCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([userId, revokedAt, resourceType])
+  @@index([dataRoomId, userId, revokedAt])
+  @@index([folderId, userId, revokedAt])
+  @@index([fileId, userId, revokedAt])
+  @@index([createdById, revokedAt])
+}
