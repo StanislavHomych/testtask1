@@ -22,6 +22,7 @@ import {
   useMoveFile,
   useOpenFile,
   useRenameFile,
+  useRetryUpload,
   useUploadPdf,
 } from '@/features/files/use-files'
 import { ApiError } from '@/lib/api/api-error'
@@ -46,6 +47,21 @@ function formatBytes(size: string): string {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function fileStatusLabel(status?: string | null): string {
+  switch (status) {
+    case 'PENDING_UPLOAD':
+      return 'Upload incomplete'
+    case 'FAILED':
+      return 'Upload failed'
+    case 'AVAILABLE':
+    case undefined:
+    case null:
+      return 'Ready'
+    default:
+      return status
+  }
+}
+
 const selectClassName =
   'h-9 rounded-lg border border-border bg-surface px-2 text-xs font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30'
 
@@ -66,6 +82,8 @@ export function FolderBrowser({
     null,
   )
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const retryInputRef = useRef<HTMLInputElement>(null)
+  const [retryFileId, setRetryFileId] = useState<string | null>(null)
   const request = useApiRequest()
 
   function openFolder(nextFolderId: string) {
@@ -83,6 +101,7 @@ export function FolderBrowser({
   const deleteFolder = useDeleteFolder(folderId)
   const moveFolder = useMoveFolder(folderId)
   const uploadPdf = useUploadPdf(folderId)
+  const retryUpload = useRetryUpload(folderId)
   const renameFile = useRenameFile(folderId)
   const deleteFile = useDeleteFile(folderId)
   const moveFile = useMoveFile(folderId)
@@ -206,6 +225,24 @@ export function FolderBrowser({
                 }
                 void run(async () => {
                   await uploadPdf.mutateAsync(file)
+                })
+              }}
+            />
+            <input
+              ref={retryInputRef}
+              type="file"
+              accept="application/pdf,.pdf"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                const fileId = retryFileId
+                event.target.value = ''
+                setRetryFileId(null)
+                if (!file || !fileId) {
+                  return
+                }
+                void run(async () => {
+                  await retryUpload.mutateAsync({ fileId, file })
                 })
               }}
             />
@@ -437,8 +474,16 @@ export function FolderBrowser({
                       </span>
                       <div>
                         <p className="font-medium text-ink">{file.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {file.status ?? 'AVAILABLE'} · {formatBytes(file.size)}
+                        <p
+                          className={`text-xs ${
+                            file.status === 'FAILED' ||
+                            file.status === 'PENDING_UPLOAD'
+                              ? 'font-medium text-[#9b2c2c]'
+                              : 'text-muted-foreground'
+                          }`}
+                        >
+                          {fileStatusLabel(file.status)} ·{' '}
+                          {formatBytes(file.size)}
                         </p>
                       </div>
                     </div>
@@ -459,7 +504,24 @@ export function FolderBrowser({
                           Open
                         </Button>
                       ) : null}
-                      {canWrite ? (
+                      {canWrite &&
+                      (file.status === 'PENDING_UPLOAD' ||
+                        file.status === 'FAILED') ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={retryUpload.isPending}
+                          onClick={() => {
+                            setRetryFileId(file.id)
+                            retryInputRef.current?.click()
+                          }}
+                        >
+                          Retry upload
+                        </Button>
+                      ) : null}
+                      {canWrite &&
+                      (file.status === 'AVAILABLE' || !file.status) ? (
                         <>
                           <select
                             className={selectClassName}
@@ -513,24 +575,26 @@ export function FolderBrowser({
                           >
                             Rename
                           </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => {
-                              if (
-                                !window.confirm(`Delete file "${file.name}"?`)
-                              ) {
-                                return
-                              }
-                              void run(async () => {
-                                await deleteFile.mutateAsync(file.id)
-                              })
-                            }}
-                          >
-                            Delete
-                          </Button>
                         </>
+                      ) : null}
+                      {canWrite ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => {
+                            if (
+                              !window.confirm(`Delete file "${file.name}"?`)
+                            ) {
+                              return
+                            }
+                            void run(async () => {
+                              await deleteFile.mutateAsync(file.id)
+                            })
+                          }}
+                        >
+                          Delete
+                        </Button>
                       ) : null}
                     </div>
                   </li>

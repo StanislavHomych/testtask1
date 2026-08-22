@@ -51,9 +51,15 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
       await this.assertBucketAccessible();
       this.logger.log(`S3 bucket is reachable: ${this.bucket}`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
+      const awsError = error as {
+        message?: string;
+        Code?: string;
+        name?: string;
+      };
+      const code = awsError.Code ?? awsError.name ?? 'UnknownError';
+      const message = awsError.message ?? 'Unknown error';
       this.logger.warn(
-        `S3 bucket is not reachable yet (${this.bucket}): ${message}`,
+        `S3 bucket is not reachable yet (${this.bucket}): ${code} ${message}`,
       );
     }
   }
@@ -76,7 +82,6 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
 
   async createUploadUrl(
     objectKey: string,
-    _contentType: string,
   ): Promise<{ url: string; expiresInSeconds: number }> {
     const url = await getSignedUrl(
       this.client,
@@ -110,14 +115,27 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
     body: Buffer,
     contentType: string,
   ): Promise<void> {
-    await this.client.send(
-      new PutObjectCommand({
-        Bucket: this.bucket,
-        Key: objectKey,
-        Body: body,
-        ContentType: contentType,
-      }),
-    );
+    try {
+      await this.client.send(
+        new PutObjectCommand({
+          Bucket: this.bucket,
+          Key: objectKey,
+          Body: body,
+          ContentType: contentType,
+        }),
+      );
+    } catch (error) {
+      const awsError = error as {
+        Code?: string;
+        message?: string;
+        name?: string;
+      };
+      const code = awsError.Code ?? awsError.name ?? 'UnknownError';
+      this.logger.error(
+        `PutObject failed for ${objectKey}: ${code} ${awsError.message ?? ''}`.trim(),
+      );
+      throw error;
+    }
   }
 
   async objectExists(objectKey: string): Promise<boolean> {

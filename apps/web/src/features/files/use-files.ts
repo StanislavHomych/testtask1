@@ -1,5 +1,6 @@
 import { useAuth } from '@clerk/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { ApiError } from '@/lib/api/api-error'
 import { getApiBaseUrl } from '@/lib/api/api-client'
 import { useApiRequest } from '@/lib/api/use-api-request'
 import type {
@@ -8,6 +9,53 @@ import type {
   UploadUrlResponse,
 } from '@/types/domain'
 import { folderKeys } from '@/features/folders/use-folders'
+
+async function uploadFileContent(
+  fileId: string,
+  file: File,
+  token: string,
+): Promise<FileSummary> {
+  const form = new FormData()
+  form.append('file', file, file.name)
+
+  const uploadResponse = await fetch(
+    `${getApiBaseUrl()}/files/${fileId}/content`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: form,
+    },
+  )
+
+  const payload: unknown = await uploadResponse.json().catch(() => null)
+
+  if (!uploadResponse.ok) {
+    throw new ApiError(
+      uploadResponse.status,
+      readUploadError(payload, uploadResponse.status),
+    )
+  }
+
+  return payload as FileSummary
+}
+
+function readUploadError(payload: unknown, status: number): string {
+  if (payload && typeof payload === 'object' && 'message' in payload) {
+    const message = (payload as { message: unknown }).message
+    if (typeof message === 'string' && message.length > 0) {
+      return message
+    }
+    if (
+      Array.isArray(message) &&
+      message.every((item) => typeof item === 'string')
+    ) {
+      return message.join(', ')
+    }
+  }
+  return `Upload failed with status ${status}`
+}
 
 export function useUploadPdf(folderId: string) {
   const request = useApiRequest()
@@ -28,30 +76,42 @@ export function useUploadPdf(folderId: string) {
 
       const token = await getToken()
       if (!token) {
-        throw new Error('Missing Clerk session token')
+        throw new ApiError(401, 'Missing Clerk session token')
       }
 
-      const form = new FormData()
-      form.append('file', file, file.name)
-
-      const uploadResponse = await fetch(
-        `${getApiBaseUrl()}/files/${prepared.file.id}/content`,
-        {
-          method: 'PUT',
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          body: form,
-        },
-      )
-
-      if (!uploadResponse.ok) {
-        throw new Error('Failed to upload file to storage')
-      }
-
-      return (await uploadResponse.json()) as FileSummary
+      return uploadFileContent(prepared.file.id, file, token)
     },
     onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: folderKeys.contents(folderId),
+      })
+    },
+    onError: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: folderKeys.contents(folderId),
+      })
+    },
+  })
+}
+
+export function useRetryUpload(folderId: string) {
+  const { getToken } = useAuth()
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ fileId, file }: { fileId: string; file: File }) => {
+      const token = await getToken()
+      if (!token) {
+        throw new ApiError(401, 'Missing Clerk session token')
+      }
+      return uploadFileContent(fileId, file, token)
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: folderKeys.contents(folderId),
+      })
+    },
+    onError: async () => {
       await queryClient.invalidateQueries({
         queryKey: folderKeys.contents(folderId),
       })

@@ -2,7 +2,9 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import {
@@ -42,6 +44,8 @@ export interface FileResponse {
 
 @Injectable()
 export class FilesService {
+  private readonly logger = new Logger(FilesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly usersService: UsersService,
@@ -97,7 +101,7 @@ export class FilesService {
       },
     });
 
-    const upload = await this.storage.createUploadUrl(storageKey, PDF_MIME);
+    const upload = await this.storage.createUploadUrl(storageKey);
 
     return {
       file: this.toResponse(file, folder.dataRoomId),
@@ -131,7 +135,29 @@ export class FilesService {
       );
     }
 
-    await this.storage.putObject(file.storageKey, body, PDF_MIME);
+    try {
+      await this.storage.putObject(file.storageKey, body, PDF_MIME);
+    } catch (error) {
+      await this.prisma.file.update({
+        where: { id: fileId },
+        data: { status: FileStatus.FAILED },
+      });
+
+      const awsError = error as { Code?: string; name?: string };
+      const code = awsError.Code ?? awsError.name ?? 'UnknownError';
+      this.logger.error(`Storage upload failed for file ${fileId}: ${code}`);
+
+      if (code === 'SignatureDoesNotMatch' || code === 'InvalidAccessKeyId') {
+        throw new ServiceUnavailableException(
+          'File storage credentials are misconfigured. Check AWS keys on the API host.',
+        );
+      }
+
+      throw new ServiceUnavailableException(
+        'Could not store the uploaded file. Try again in a moment.',
+      );
+    }
+
     return this.completeUpload(clerkUserId, fileId, {});
   }
 

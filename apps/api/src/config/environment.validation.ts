@@ -62,7 +62,14 @@ class EnvironmentVariables {
 export function validateEnvironment(
   config: Record<string, unknown>,
 ): Record<string, unknown> {
-  const validated = plainToInstance(EnvironmentVariables, config, {
+  const cleaned = Object.fromEntries(
+    Object.entries(config).map(([key, value]) => [
+      key,
+      typeof value === 'string' ? sanitizeEnvValue(value) : value,
+    ]),
+  );
+
+  const validated = plainToInstance(EnvironmentVariables, cleaned, {
     enableImplicitConversion: true,
   });
   const errors = validateSync(validated, { skipMissingProperties: false });
@@ -71,5 +78,16 @@ export function validateEnvironment(
     throw new Error(errors.toString());
   }
 
-  return config;
+  return cleaned;
+}
+
+function sanitizeEnvValue(value: string): string {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
 }
