@@ -341,7 +341,7 @@
 | ✅ | Backend URL (local) |
 | ⚠️ | No missing required sections — deploy is the main gap vs a “shipped” take-home |
 
-Also present: `PRESENTATION.md`, OpenAPI (`/api/docs`), this audit, `ZAP.md`.
+Also present: OpenAPI (`/api/docs`), this audit, `ZAP.md`.
 
 ---
 

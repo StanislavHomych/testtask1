@@ -60,7 +60,6 @@ npm run dev:web      # http://localhost:5173
 | OpenAPI | http://localhost:3000/api/docs |
 | Health | http://localhost:3000/api/health |
 
-Demo script: [PRESENTATION.md](./PRESENTATION.md)  
 Internal QA checklist: [docs/AUDIT.md](./docs/AUDIT.md)  
 ZAP scan notes: [docs/ZAP.md](./docs/ZAP.md)
 
@@ -142,7 +141,6 @@ apps/
   web/          React client (marketing + app shell)
   api/          NestJS API + Prisma
 docs/           Audit & ZAP notes
-PRESENTATION.md Live demo script
 compose.yaml    Optional local Postgres
 ```
 
