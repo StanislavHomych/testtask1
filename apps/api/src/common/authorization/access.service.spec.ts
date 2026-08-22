@@ -26,12 +26,6 @@ const ResourceStatus = {
   DELETED: 'DELETED',
 } as const;
 
-const ResourceType = {
-  DATA_ROOM: 'DATA_ROOM',
-  FOLDER: 'FOLDER',
-  FILE: 'FILE',
-} as const;
-
 const ShareRole = {
   VIEWER: 'VIEWER',
   EDITOR: 'EDITOR',
