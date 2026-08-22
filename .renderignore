@@ -1,0 +1,12 @@
+# Render uses this instead of .gitignore when packing the build.
+# Keep compiled API output so start:prod can find dist/.
+.env
+.env.*
+coverage/
+*.log
+.DS_Store
+.neon
+.agents/
+playwright-report/
+test-results/
+apps/web/dist/
