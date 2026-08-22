@@ -224,9 +224,3 @@ npm run playwright:install
 - Email share requires the recipient to have signed in once
 - File-level share is API-ready; UI exposes room/folder sharing
 - No public production deploy in this repo by default
-
-## AI usage note
-
-Cursor was used for scaffolding and implementation. Human review covered Prisma
-constraints, authorization inheritance (including share-scope leakage fixes),
-S3 key layout, CORS vs app IAM, and not proxying PDFs through Nest.

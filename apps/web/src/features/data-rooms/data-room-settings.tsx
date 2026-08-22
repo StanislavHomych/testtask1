@@ -1,7 +1,9 @@
+import { useState } from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Input } from '@/components/ui/input'
 import type { DataRoomSummary } from '@/types/domain'
 import { dataRoomNameSchema, type DataRoomNameValues } from './data-room-schema'
@@ -11,6 +13,7 @@ export function DataRoomSettings({ dataRoom }: { dataRoom: DataRoomSummary }) {
   const navigate = useNavigate()
   const updateDataRoom = useUpdateDataRoom(dataRoom.id)
   const deleteDataRoom = useDeleteDataRoom()
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const form = useForm<DataRoomNameValues>({
     resolver: zodResolver(dataRoomNameSchema),
     defaultValues: { name: dataRoom.name },
@@ -43,10 +46,7 @@ export function DataRoomSettings({ dataRoom }: { dataRoom: DataRoomSummary }) {
             Data room name
           </label>
           <div className="flex flex-col gap-3 sm:flex-row">
-            <Input
-              id="settings-room-name"
-              {...form.register('name')}
-            />
+            <Input id="settings-room-name" {...form.register('name')} />
             <Button type="submit" disabled={updateDataRoom.isPending}>
               {updateDataRoom.isPending ? 'Saving…' : 'Save changes'}
             </Button>
@@ -72,22 +72,27 @@ export function DataRoomSettings({ dataRoom }: { dataRoom: DataRoomSummary }) {
           type="button"
           variant="destructive"
           disabled={deleteDataRoom.isPending}
-          onClick={() => {
-            if (
-              !window.confirm(
-                `Delete "${dataRoom.name}"? Folders and files will become inaccessible.`,
-              )
-            ) {
-              return
-            }
-            void deleteDataRoom.mutateAsync(dataRoom.id).then(() => {
-              void navigate('/')
-            })
-          }}
+          onClick={() => setConfirmDelete(true)}
         >
           {deleteDataRoom.isPending ? 'Deleting…' : 'Delete data room'}
         </Button>
       </section>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title="Delete data room?"
+        description={`Delete “${dataRoom.name}”? Folders, files, and share links will become inaccessible.`}
+        confirmLabel="Delete room"
+        tone="destructive"
+        busy={deleteDataRoom.isPending}
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={() => {
+          void deleteDataRoom.mutateAsync(dataRoom.id).then(() => {
+            setConfirmDelete(false)
+            void navigate('/')
+          })
+        }}
+      />
     </div>
   )
 }

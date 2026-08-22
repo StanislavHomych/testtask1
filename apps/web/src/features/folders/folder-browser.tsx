@@ -9,7 +9,10 @@ import {
 } from 'lucide-react'
 import { PdfPreview } from '@/components/pdf-preview'
 import { Button } from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Input } from '@/components/ui/input'
+import { MenuSelect } from '@/components/ui/menu-select'
+import { PromptDialog } from '@/components/ui/prompt-dialog'
 import {
   useCreateFolder,
   useDeleteFolder,
@@ -62,14 +65,14 @@ function fileStatusLabel(status?: string | null): string {
   }
 }
 
-const selectClassName =
-  'h-9 rounded-lg border border-border bg-surface px-2 text-xs font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30'
+type DialogState =
+  | { type: 'idle' }
+  | { type: 'rename-folder'; folder: FolderSummary }
+  | { type: 'delete-folder'; folder: FolderSummary }
+  | { type: 'rename-file'; file: FileSummary }
+  | { type: 'delete-file'; file: FileSummary }
 
-export function FolderBrowser({
-  rootFolderId,
-}: {
-  rootFolderId: string
-}) {
+export function FolderBrowser({ rootFolderId }: { rootFolderId: string }) {
   const [folderId, setFolderId] = useState(rootFolderId)
   const [newFolderName, setNewFolderName] = useState('')
   const [showNewFolder, setShowNewFolder] = useState(false)
@@ -81,6 +84,8 @@ export function FolderBrowser({
   const [preview, setPreview] = useState<{ url: string; title: string } | null>(
     null,
   )
+  const [dialog, setDialog] = useState<DialogState>({ type: 'idle' })
+  const [dialogBusy, setDialogBusy] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const retryInputRef = useRef<HTMLInputElement>(null)
   const [retryFileId, setRetryFileId] = useState<string | null>(null)
@@ -125,12 +130,42 @@ export function FolderBrowser({
     [contents.data?.folder.name],
   )
 
+  const sharedMoveOptions = [
+    ...(parentFolderId
+      ? [
+          {
+            value: parentFolderId,
+            label: 'Parent folder',
+            description: 'Move one level up',
+          },
+        ]
+      : []),
+    ...listedFolders.map((item) => ({
+      value: item.id,
+      label: item.name,
+      description: 'Folder in this location',
+    })),
+  ]
+
   async function run(action: () => Promise<unknown>) {
     setError(null)
     try {
       await action()
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Something went wrong')
+    }
+  }
+
+  async function runDialog(action: () => Promise<unknown>) {
+    setDialogBusy(true)
+    setError(null)
+    try {
+      await action()
+      setDialog({ type: 'idle' })
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Something went wrong')
+    } finally {
+      setDialogBusy(false)
     }
   }
 
@@ -164,90 +199,90 @@ export function FolderBrowser({
     <section className="surface-panel overflow-hidden text-card-foreground">
       <div className="border-b border-border/70 bg-surface/75 px-5 py-5 sm:px-7">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-            Current folder
-          </p>
-          <h2 className="mt-1 flex items-center gap-2 font-display text-2xl font-semibold tracking-tight text-ink">
-            <FolderOpen className="h-5 w-5 text-primary" aria-hidden="true" />
-            {title}
-          </h2>
-          <nav
-            className="mt-3 flex flex-wrap items-center gap-1 text-sm text-muted-foreground"
-            aria-label="Folder path"
-          >
-            {breadcrumbs.map((crumb, index) => (
-              <span key={crumb.id} className="inline-flex items-center gap-1">
-                {index > 0 ? (
-                  <ChevronRight className="h-3.5 w-3.5 opacity-40" />
-                ) : null}
-                <button
-                  type="button"
-                  className="rounded-md px-1 font-medium transition-colors hover:bg-accent hover:text-ink"
-                  onClick={() => openFolder(crumb.id)}
-                >
-                  {crumb.name}
-                </button>
-              </span>
-            ))}
-          </nav>
-        </div>
-        {canWrite ? (
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setShowNewFolder((value) => !value)}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+              Current folder
+            </p>
+            <h2 className="mt-1 flex items-center gap-2 font-display text-2xl font-semibold tracking-tight text-ink">
+              <FolderOpen className="h-5 w-5 text-primary" aria-hidden="true" />
+              {title}
+            </h2>
+            <nav
+              className="mt-3 flex flex-wrap items-center gap-1 text-sm text-muted-foreground"
+              aria-label="Folder path"
             >
-              <FolderPlus className="mr-1.5 h-4 w-4" aria-hidden="true" />
-              New folder
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              disabled={uploadPdf.isPending}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <FileUp className="mr-1.5 h-4 w-4" aria-hidden="true" />
-              {uploadPdf.isPending ? 'Uploading…' : 'Upload PDF'}
-            </Button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="application/pdf,.pdf"
-              className="hidden"
-              onChange={(event) => {
-                const file = event.target.files?.[0]
-                event.target.value = ''
-                if (!file) {
-                  return
-                }
-                void run(async () => {
-                  await uploadPdf.mutateAsync(file)
-                })
-              }}
-            />
-            <input
-              ref={retryInputRef}
-              type="file"
-              accept="application/pdf,.pdf"
-              className="hidden"
-              onChange={(event) => {
-                const file = event.target.files?.[0]
-                const fileId = retryFileId
-                event.target.value = ''
-                setRetryFileId(null)
-                if (!file || !fileId) {
-                  return
-                }
-                void run(async () => {
-                  await retryUpload.mutateAsync({ fileId, file })
-                })
-              }}
-            />
+              {breadcrumbs.map((crumb, index) => (
+                <span key={crumb.id} className="inline-flex items-center gap-1">
+                  {index > 0 ? (
+                    <ChevronRight className="h-3.5 w-3.5 opacity-40" />
+                  ) : null}
+                  <button
+                    type="button"
+                    className="rounded-md px-1 font-medium transition-colors hover:bg-accent hover:text-ink"
+                    onClick={() => openFolder(crumb.id)}
+                  >
+                    {crumb.name}
+                  </button>
+                </span>
+              ))}
+            </nav>
           </div>
-        ) : null}
+          {canWrite ? (
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowNewFolder((value) => !value)}
+              >
+                <FolderPlus className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                New folder
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                disabled={uploadPdf.isPending}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <FileUp className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                {uploadPdf.isPending ? 'Uploading…' : 'Upload PDF'}
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/pdf,.pdf"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0]
+                  event.target.value = ''
+                  if (!file) {
+                    return
+                  }
+                  void run(async () => {
+                    await uploadPdf.mutateAsync(file)
+                  })
+                }}
+              />
+              <input
+                ref={retryInputRef}
+                type="file"
+                accept="application/pdf,.pdf"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0]
+                  const fileId = retryFileId
+                  event.target.value = ''
+                  setRetryFileId(null)
+                  if (!file || !fileId) {
+                    return
+                  }
+                  void run(async () => {
+                    await retryUpload.mutateAsync({ fileId, file })
+                  })
+                }}
+              />
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -348,16 +383,14 @@ export function FolderBrowser({
                     </button>
                     {canWrite ? (
                       <div className="flex flex-wrap gap-2">
-                        <select
-                          className={selectClassName}
-                          defaultValue=""
-                          aria-label={`Move ${folder.name}`}
-                          onChange={(event) => {
-                            const targetParentId = event.target.value
-                            event.target.value = ''
-                            if (!targetParentId) {
-                              return
-                            }
+                        <MenuSelect
+                          label="Move"
+                          placeholder="Move folder to"
+                          options={sharedMoveOptions.filter(
+                            (option) => option.value !== folder.id,
+                          )}
+                          emptyMessage="No other folders to move into"
+                          onSelect={(targetParentId) => {
                             void run(async () => {
                               await moveFolder.mutateAsync({
                                 folderId: folder.id,
@@ -365,38 +398,14 @@ export function FolderBrowser({
                               })
                             })
                           }}
-                        >
-                          <option value="">Move to…</option>
-                          {parentFolderId ? (
-                            <option value={parentFolderId}>Parent folder</option>
-                          ) : null}
-                          {listedFolders
-                            .filter((item) => item.id !== folder.id)
-                            .map((item) => (
-                              <option key={item.id} value={item.id}>
-                                {item.name}
-                              </option>
-                            ))}
-                        </select>
+                        />
                         <Button
                           type="button"
                           size="sm"
                           variant="outline"
-                          onClick={() => {
-                            const name = window.prompt(
-                              'Rename folder',
-                              folder.name,
-                            )
-                            if (!name?.trim()) {
-                              return
-                            }
-                            void run(async () => {
-                              await renameFolder.mutateAsync({
-                                folderId: folder.id,
-                                name: name.trim(),
-                              })
-                            })
-                          }}
+                          onClick={() =>
+                            setDialog({ type: 'rename-folder', folder })
+                          }
                         >
                           Rename
                         </Button>
@@ -404,18 +413,9 @@ export function FolderBrowser({
                           type="button"
                           size="sm"
                           variant="destructive"
-                          onClick={() => {
-                            if (
-                              !window.confirm(
-                                `Delete folder "${folder.name}" and its contents?`,
-                              )
-                            ) {
-                              return
-                            }
-                            void run(async () => {
-                              await deleteFolder.mutateAsync(folder.id)
-                            })
-                          }}
+                          onClick={() =>
+                            setDialog({ type: 'delete-folder', folder })
+                          }
                         >
                           Delete
                         </Button>
@@ -523,16 +523,12 @@ export function FolderBrowser({
                       {canWrite &&
                       (file.status === 'AVAILABLE' || !file.status) ? (
                         <>
-                          <select
-                            className={selectClassName}
-                            defaultValue=""
-                            aria-label={`Move ${file.name}`}
-                            onChange={(event) => {
-                              const targetFolderId = event.target.value
-                              event.target.value = ''
-                              if (!targetFolderId) {
-                                return
-                              }
+                          <MenuSelect
+                            label="Move"
+                            placeholder="Move file to"
+                            options={sharedMoveOptions}
+                            emptyMessage="Create a folder first"
+                            onSelect={(targetFolderId) => {
                               void run(async () => {
                                 await moveFile.mutateAsync({
                                   fileId: file.id,
@@ -540,38 +536,14 @@ export function FolderBrowser({
                                 })
                               })
                             }}
-                          >
-                            <option value="">Move to…</option>
-                            {parentFolderId ? (
-                              <option value={parentFolderId}>
-                                Parent folder
-                              </option>
-                            ) : null}
-                            {listedFolders.map((item) => (
-                              <option key={item.id} value={item.id}>
-                                {item.name}
-                              </option>
-                            ))}
-                          </select>
+                          />
                           <Button
                             type="button"
                             size="sm"
                             variant="outline"
-                            onClick={() => {
-                              const name = window.prompt(
-                                'Rename file',
-                                file.name,
-                              )
-                              if (!name?.trim()) {
-                                return
-                              }
-                              void run(async () => {
-                                await renameFile.mutateAsync({
-                                  fileId: file.id,
-                                  name: name.trim(),
-                                })
-                              })
-                            }}
+                            onClick={() =>
+                              setDialog({ type: 'rename-file', file })
+                            }
                           >
                             Rename
                           </Button>
@@ -582,16 +554,9 @@ export function FolderBrowser({
                           type="button"
                           size="sm"
                           variant="destructive"
-                          onClick={() => {
-                            if (
-                              !window.confirm(`Delete file "${file.name}"?`)
-                            ) {
-                              return
-                            }
-                            void run(async () => {
-                              await deleteFile.mutateAsync(file.id)
-                            })
-                          }}
+                          onClick={() =>
+                            setDialog({ type: 'delete-file', file })
+                          }
                         >
                           Delete
                         </Button>
@@ -636,6 +601,96 @@ export function FolderBrowser({
           ) : null}
         </div>
       ) : null}
+
+      <PromptDialog
+        open={dialog.type === 'rename-folder'}
+        title="Rename folder"
+        description="Choose a clear name your teammates will recognize."
+        label="Folder name"
+        initialValue={
+          dialog.type === 'rename-folder' ? dialog.folder.name : ''
+        }
+        confirmLabel="Save name"
+        busy={dialogBusy}
+        onClose={() => setDialog({ type: 'idle' })}
+        onConfirm={(name) => {
+          if (dialog.type !== 'rename-folder') {
+            return
+          }
+          void runDialog(async () => {
+            await renameFolder.mutateAsync({
+              folderId: dialog.folder.id,
+              name,
+            })
+          })
+        }}
+      />
+
+      <ConfirmDialog
+        open={dialog.type === 'delete-folder'}
+        title="Delete folder?"
+        description={
+          dialog.type === 'delete-folder'
+            ? `Delete “${dialog.folder.name}” and everything inside it? This cannot be undone.`
+            : ''
+        }
+        confirmLabel="Delete folder"
+        tone="destructive"
+        busy={dialogBusy}
+        onClose={() => setDialog({ type: 'idle' })}
+        onConfirm={() => {
+          if (dialog.type !== 'delete-folder') {
+            return
+          }
+          void runDialog(async () => {
+            await deleteFolder.mutateAsync(dialog.folder.id)
+          })
+        }}
+      />
+
+      <PromptDialog
+        open={dialog.type === 'rename-file'}
+        title="Rename document"
+        description="Keep the .pdf extension so the file stays recognizable."
+        label="File name"
+        initialValue={dialog.type === 'rename-file' ? dialog.file.name : ''}
+        confirmLabel="Save name"
+        busy={dialogBusy}
+        onClose={() => setDialog({ type: 'idle' })}
+        onConfirm={(name) => {
+          if (dialog.type !== 'rename-file') {
+            return
+          }
+          void runDialog(async () => {
+            await renameFile.mutateAsync({
+              fileId: dialog.file.id,
+              name,
+            })
+          })
+        }}
+      />
+
+      <ConfirmDialog
+        open={dialog.type === 'delete-file'}
+        title="Delete document?"
+        description={
+          dialog.type === 'delete-file'
+            ? `Delete “${dialog.file.name}”? The file will be removed from storage.`
+            : ''
+        }
+        confirmLabel="Delete file"
+        tone="destructive"
+        busy={dialogBusy}
+        onClose={() => setDialog({ type: 'idle' })}
+        onConfirm={() => {
+          if (dialog.type !== 'delete-file') {
+            return
+          }
+          void runDialog(async () => {
+            await deleteFile.mutateAsync(dialog.file.id)
+          })
+        }}
+      />
     </section>
   )
 }
