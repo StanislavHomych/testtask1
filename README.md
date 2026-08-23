@@ -257,16 +257,17 @@ Checklist:
 4. Deploy API, then web pointing `VITE_API_URL` at the API.
 5. Confirm `/api/health`, sign-in, upload, and a public share link.
 
-Example public URLs (replace with yours):
+Example public URLs:
 
 - Frontend: `https://testtask1-web.vercel.app`
-- API: `https://your-api.onrender.com/api`
+- API: `https://testtask1.onrender.com/api`
+- Health: `https://testtask1.onrender.com/api/health`
 
 ## Known MVP limits
 
 - Email share requires the recipient to have signed in once
 - EDITOR role exists in the schema but is not assigned by the MVP UI
-- Production “publicly accessible” checklist items depend on your live Vercel/Render URLs and env; local + documented deploy path are in place
+- Render Free may cold-start after ~15 minutes idle unless keep-alive is configured
 
 ## AI usage note
 

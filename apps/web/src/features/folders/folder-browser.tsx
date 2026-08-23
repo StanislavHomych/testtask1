@@ -334,9 +334,12 @@ export function FolderBrowser({
                 multiple
                 className="hidden"
                 onChange={(event) => {
+                  // Copy before reset — FileList is live and clears with value=''
                   const files = event.target.files
+                    ? [...event.target.files]
+                    : []
                   event.target.value = ''
-                  if (!files?.length) {
+                  if (!files.length) {
                     return
                   }
                   queueUploads(files)
