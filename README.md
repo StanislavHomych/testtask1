@@ -15,7 +15,7 @@ React / Vite / Clerk
   → NestJS REST API
       → domain modules (users, data rooms, folders, files, sharing)
       → Prisma → Neon / PostgreSQL
-      → AWS SDK v3 → S3 (presigned upload & view; API proxy fallback)
+      → AWS SDK v3 → S3 (presigned upload & view)
 ```
 
 Clerk verifies identity. Nest maps the JWT subject to a local `User`. Postgres
@@ -135,7 +135,6 @@ Object keys: `data-rooms/{dataRoomId}/files/{fileId}` (versions append
 2. Nest authorizes and returns a short-lived presigned PUT URL
 3. Browser uploads directly to S3 (progress via XHR)
 4. Frontend calls `POST /files/:id/complete` (magic-byte + size checks)
-5. If browser→S3 CORS fails, the client falls back to `PUT /files/:id/content`
 
 Multi-file and drag-and-drop uploads are supported in the folder UI.
 
@@ -208,10 +207,9 @@ unless `ENABLE_SWAGGER=true`.
 - `POST /api/folders/:id/folders`, `PATCH/DELETE /api/folders/:id`
 - `POST /api/folders/:id/move`
 - `POST /api/files/upload-url`, `POST /api/files/:id/complete`
-- `PUT /api/files/:id/content` (CORS fallback)
 - `GET /api/files/:id`, `GET /api/files/:id/view-url`
 - `PATCH/DELETE /api/files/:id`, `POST /api/files/:id/move`
-- `GET/POST /api/files/:id/versions*`, `PUT /api/files/:id/versions/content`
+- `GET/POST /api/files/:id/versions*`
 - `POST/GET /api/shares`, `DELETE /api/shares/:id`
 - `GET /api/shared/:token?folderId=&foldersCursor=&filesCursor=`
 - `GET /api/shared/:token/files/:fileId/view-url`
@@ -273,5 +271,5 @@ Example public URLs (replace with yours):
 ## AI usage note
 
 Cursor was used for scaffolding and implementation assistance. Human review
-covered Prisma constraints, authorization inheritance, S3 key layout, CORS vs
-app IAM, upload fallback behavior, sharing scope, and production env wiring.
+covered Prisma constraints, authorization inheritance, S3 key layout,
+sharing scope, and production env wiring.
