@@ -17,6 +17,10 @@ import {
   redactParentIdOutsideClip,
 } from '../common/utils/access-redaction';
 import {
+  decodeCreatedAtCursor,
+  encodeCreatedAtCursor,
+} from '../common/utils/cursor';
+import {
   createPublicShareToken,
   hashPublicShareToken,
 } from '../common/utils/share-token';
@@ -25,6 +29,7 @@ import { StorageService } from '../storage/storage.service';
 import { UsersService } from '../users/users.service';
 import type { CreateShareDto } from './dto/create-share.dto';
 import type { ListSharesDto } from './dto/list-shares.dto';
+import type { ResolvePublicShareQueryDto } from './dto/resolve-public-share.dto';
 
 export interface ShareResponse {
   id: string;
@@ -184,7 +189,12 @@ export class SharingService {
     });
   }
 
-  async resolvePublicToken(rawToken: string, folderId?: string) {
+  async resolvePublicToken(
+    rawToken: string,
+    query: ResolvePublicShareQueryDto = {},
+  ) {
+    const folderId = query.folderId;
+    const limit = query.limit ?? 50;
     const tokenHash = hashPublicShareToken(rawToken);
     const share = await this.prisma.share.findFirst({
       where: {
@@ -219,7 +229,11 @@ export class SharingService {
         await this.assertFolderCoveredByShare(share, scopedFolderId);
       }
       const contents = scopedFolderId
-        ? await this.getPublicFolderContents(scopedFolderId)
+        ? await this.getPublicFolderContents(scopedFolderId, undefined, {
+            limit,
+            foldersCursor: query.foldersCursor,
+            filesCursor: query.filesCursor,
+          })
         : null;
       return {
         resourceType: share.resourceType,
@@ -231,8 +245,8 @@ export class SharingService {
         },
         folder: contents?.folder ?? null,
         breadcrumbs: contents?.breadcrumbs ?? [],
-        folders: contents?.folders ?? [],
-        files: contents?.files ?? [],
+        folders: contents?.folders ?? { items: [], nextCursor: null, hasNextPage: false },
+        files: contents?.files ?? { items: [], nextCursor: null, hasNextPage: false },
         file: null,
         viewUrl: null,
       };
@@ -244,6 +258,11 @@ export class SharingService {
       const contents = await this.getPublicFolderContents(
         scopedFolderId,
         share.folderId,
+        {
+          limit,
+          foldersCursor: query.foldersCursor,
+          filesCursor: query.filesCursor,
+        },
       );
       return {
         resourceType: share.resourceType,
@@ -295,8 +314,8 @@ export class SharingService {
         },
         folder: null,
         breadcrumbs: [],
-        folders: [],
-        files: [],
+        folders: { items: [], nextCursor: null, hasNextPage: false },
+        files: { items: [], nextCursor: null, hasNextPage: false },
         file: {
           id: file.id,
           name: file.name,
@@ -304,6 +323,7 @@ export class SharingService {
           size: file.size.toString(),
           folderId: file.folderId,
           status: file.status,
+          currentVersion: file.currentVersion,
         },
         viewUrl: view.url,
         expiresInSeconds: view.expiresInSeconds,
@@ -426,7 +446,15 @@ export class SharingService {
     throw new NotFoundException('Shared resource not found');
   }
 
-  private async getPublicFolderContents(folderId: string, clipRootId?: string) {
+  private async getPublicFolderContents(
+    folderId: string,
+    clipRootId?: string,
+    pagination: {
+      limit: number;
+      foldersCursor?: string;
+      filesCursor?: string;
+    } = { limit: 50 },
+  ) {
     const folder = await this.prisma.folder.findUnique({
       where: { id: folderId },
       include: { dataRoom: { select: { name: true, status: true } } },
@@ -439,22 +467,63 @@ export class SharingService {
       throw new NotFoundException('Shared resource not found');
     }
 
-    const [folders, files, rawBreadcrumbs] = await Promise.all([
+    const foldersDecoded = pagination.foldersCursor
+      ? decodeCreatedAtCursor(pagination.foldersCursor)
+      : undefined;
+    const filesDecoded = pagination.filesCursor
+      ? decodeCreatedAtCursor(pagination.filesCursor)
+      : undefined;
+
+    const [folderRows, fileRows, rawBreadcrumbs] = await Promise.all([
       this.prisma.folder.findMany({
-        where: { parentId: folderId, status: ResourceStatus.ACTIVE },
+        where: {
+          parentId: folderId,
+          status: ResourceStatus.ACTIVE,
+          ...(foldersDecoded
+            ? {
+                OR: [
+                  { createdAt: { lt: foldersDecoded.createdAt } },
+                  {
+                    createdAt: foldersDecoded.createdAt,
+                    id: { lt: foldersDecoded.id },
+                  },
+                ],
+              }
+            : {}),
+        },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        take: 100,
+        take: pagination.limit + 1,
       }),
       this.prisma.file.findMany({
         where: {
           folderId,
           status: FileStatus.AVAILABLE,
+          ...(filesDecoded
+            ? {
+                OR: [
+                  { createdAt: { lt: filesDecoded.createdAt } },
+                  {
+                    createdAt: filesDecoded.createdAt,
+                    id: { lt: filesDecoded.id },
+                  },
+                ],
+              }
+            : {}),
         },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        take: 100,
+        take: pagination.limit + 1,
       }),
       this.buildBreadcrumbs(folderId),
     ]);
+
+    const foldersHasNext = folderRows.length > pagination.limit;
+    const foldersPage = foldersHasNext
+      ? folderRows.slice(0, pagination.limit)
+      : folderRows;
+    const filesHasNext = fileRows.length > pagination.limit;
+    const filesPage = filesHasNext
+      ? fileRows.slice(0, pagination.limit)
+      : fileRows;
 
     const breadcrumbs = clipBreadcrumbsToRoot(rawBreadcrumbs, clipRootId);
 
@@ -471,20 +540,39 @@ export class SharingService {
         ),
       },
       breadcrumbs,
-      folders: folders.map((row) => ({
-        id: row.id,
-        name: row.name,
-        dataRoomId: row.dataRoomId,
-        parentId: row.parentId,
-      })),
-      files: files.map((row) => ({
-        id: row.id,
-        name: row.name,
-        mimeType: row.mimeType,
-        size: row.size.toString(),
-        folderId: row.folderId,
-        status: row.status,
-      })),
+      folders: {
+        items: foldersPage.map((row) => ({
+          id: row.id,
+          name: row.name,
+          dataRoomId: row.dataRoomId,
+          parentId: row.parentId,
+        })),
+        nextCursor: foldersHasNext
+          ? encodeCreatedAtCursor(
+              foldersPage[foldersPage.length - 1].createdAt,
+              foldersPage[foldersPage.length - 1].id,
+            )
+          : null,
+        hasNextPage: foldersHasNext,
+      },
+      files: {
+        items: filesPage.map((row) => ({
+          id: row.id,
+          name: row.name,
+          mimeType: row.mimeType,
+          size: row.size.toString(),
+          folderId: row.folderId,
+          status: row.status,
+          currentVersion: row.currentVersion,
+        })),
+        nextCursor: filesHasNext
+          ? encodeCreatedAtCursor(
+              filesPage[filesPage.length - 1].createdAt,
+              filesPage[filesPage.length - 1].id,
+            )
+          : null,
+        hasNextPage: filesHasNext,
+      },
     };
   }
 

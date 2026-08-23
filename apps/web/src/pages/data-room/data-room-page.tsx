@@ -1,11 +1,18 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { Files, Settings, Share2, ShieldCheck } from 'lucide-react'
+import { Files, Search, Settings, Share2, ShieldCheck } from 'lucide-react'
 import { PageShell } from '@/components/layout/page-shell'
+import { PdfPreview } from '@/components/pdf-preview'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { DataRoomSettings } from '@/features/data-rooms/data-room-settings'
 import { useDataRoom } from '@/features/data-rooms/use-data-rooms'
+import { useOpenFile } from '@/features/files/use-files'
 import { FolderBrowser } from '@/features/folders/folder-browser'
 import { SharePanel } from '@/features/sharing/share-panel'
+import { ApiError } from '@/lib/api/api-error'
+import { useApiRequest } from '@/lib/api/use-api-request'
+import type { FileSummary } from '@/types/domain'
 
 export function DataRoomPage() {
   const { dataRoomId } = useParams<{ dataRoomId: string }>()
@@ -13,6 +20,15 @@ export function DataRoomPage() {
   const [activeTab, setActiveTab] = useState<'files' | 'sharing' | 'settings'>(
     'files',
   )
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<FileSummary[] | null>(null)
+  const [searchBusy, setSearchBusy] = useState(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
+  const [preview, setPreview] = useState<{ url: string; title: string } | null>(
+    null,
+  )
+  const request = useApiRequest()
+  const openFile = useOpenFile()
 
   if (!dataRoomId) {
     return (
@@ -36,7 +52,10 @@ export function DataRoomPage() {
         <p className="text-sm text-muted-foreground">
           This data room is missing or you do not have access.
         </p>
-        <Link className="mt-4 inline-block text-sm font-semibold text-primary underline-offset-4 hover:underline" to="/">
+        <Link
+          className="mt-4 inline-block text-sm font-semibold text-primary underline-offset-4 hover:underline"
+          to="/"
+        >
           Back to rooms
         </Link>
       </PageShell>
@@ -83,6 +102,106 @@ export function DataRoomPage() {
         </div>
       </section>
 
+      <form
+        className="mb-6 flex flex-col gap-3 sm:flex-row"
+        onSubmit={(event) => {
+          event.preventDefault()
+          const q = searchQuery.trim()
+          if (!q) {
+            setSearchResults(null)
+            return
+          }
+          setSearchBusy(true)
+          setSearchError(null)
+          void request<{ items: FileSummary[] }>(
+            `/data-rooms/${dataRoom.id}/search?q=${encodeURIComponent(q)}`,
+          )
+            .then((result) => setSearchResults(result.items))
+            .catch((err) => {
+              setSearchError(
+                err instanceof ApiError ? err.message : 'Search failed',
+              )
+            })
+            .finally(() => setSearchBusy(false))
+        }}
+      >
+        <div className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            className="pl-9"
+            placeholder="Search PDFs in this room by filename"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+          />
+        </div>
+        <Button type="submit" disabled={searchBusy}>
+          {searchBusy ? 'Searching…' : 'Search'}
+        </Button>
+        {searchResults ? (
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => {
+              setSearchResults(null)
+              setSearchQuery('')
+              setPreview(null)
+            }}
+          >
+            Clear
+          </Button>
+        ) : null}
+      </form>
+
+      {searchError ? (
+        <p className="mb-4 text-sm text-[#9b2c2c]">{searchError}</p>
+      ) : null}
+
+      {searchResults ? (
+        <section className="surface-panel mb-6 p-6">
+          <h2 className="font-display text-lg font-semibold text-ink">
+            Search results
+          </h2>
+          {searchResults.length === 0 ? (
+            <p className="mt-3 text-sm text-muted-foreground">
+              No matching PDFs.
+            </p>
+          ) : (
+            <ul className="mt-4 divide-y divide-border/70 overflow-hidden rounded-2xl border border-border/80">
+              {searchResults.map((file) => (
+                <li
+                  key={file.id}
+                  className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div>
+                    <p className="font-medium text-ink">{file.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      v{file.currentVersion ?? 1}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      void openFile.mutateAsync(file.id).then((result) => {
+                        setPreview({ url: result.url, title: file.name })
+                      })
+                    }}
+                  >
+                    Open
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {preview ? (
+            <div className="mt-6">
+              <PdfPreview url={preview.url} title={preview.title} />
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
       <div
         className="mb-6 flex gap-1 overflow-x-auto rounded-xl border border-border/70 bg-surface/70 p-1"
         role="tablist"
@@ -122,6 +241,7 @@ export function DataRoomPage() {
           <FolderBrowser
             key={dataRoom.rootFolderId}
             rootFolderId={dataRoom.rootFolderId}
+            dataRoomId={dataRoom.id}
           />
         ) : (
           <section className="surface-panel p-8 text-center text-sm text-muted-foreground">

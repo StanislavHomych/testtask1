@@ -21,7 +21,7 @@ export class SharedPublicController {
     @Param('token') token: string,
     @Query() query: ResolvePublicShareQueryDto,
   ) {
-    return this.sharingService.resolvePublicToken(token, query.folderId);
+    return this.sharingService.resolvePublicToken(token, query);
   }
 
   @Get(':token/files/:fileId/view-url')

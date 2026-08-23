@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronRight,
   FileText,
@@ -6,10 +6,12 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
+  Share2,
 } from 'lucide-react'
 import { PdfPreview } from '@/components/pdf-preview'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { Dialog } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { MenuSelect } from '@/components/ui/menu-select'
 import { PromptDialog } from '@/components/ui/prompt-dialog'
@@ -22,17 +24,23 @@ import {
 } from '@/features/folders/use-folders'
 import {
   useDeleteFile,
+  useFileVersions,
   useMoveFile,
   useOpenFile,
+  useOpenFileVersion,
   useRenameFile,
   useRetryUpload,
-  useUploadPdf,
+  useUploadNewVersion,
+  useUploadPdfs,
+  type UploadProgressEvent,
 } from '@/features/files/use-files'
+import { SharePanel } from '@/features/sharing/share-panel'
 import { ApiError } from '@/lib/api/api-error'
 import { useApiRequest } from '@/lib/api/use-api-request'
 import type {
   FileSummary,
   FolderContentsResponse,
+  FolderOption,
   FolderSummary,
 } from '@/types/domain'
 
@@ -65,14 +73,28 @@ function fileStatusLabel(status?: string | null): string {
   }
 }
 
+function isPdfFile(file: File): boolean {
+  const name = file.name.toLowerCase()
+  return file.type === 'application/pdf' || name.endsWith('.pdf')
+}
+
 type DialogState =
   | { type: 'idle' }
   | { type: 'rename-folder'; folder: FolderSummary }
   | { type: 'delete-folder'; folder: FolderSummary }
   | { type: 'rename-file'; file: FileSummary }
   | { type: 'delete-file'; file: FileSummary }
+  | { type: 'share-folder'; folder: FolderSummary }
+  | { type: 'share-file'; file: FileSummary }
+  | { type: 'versions'; file: FileSummary }
 
-export function FolderBrowser({ rootFolderId }: { rootFolderId: string }) {
+export function FolderBrowser({
+  rootFolderId,
+  dataRoomId,
+}: {
+  rootFolderId: string
+  dataRoomId: string
+}) {
   const [folderId, setFolderId] = useState(rootFolderId)
   const [newFolderName, setNewFolderName] = useState('')
   const [showNewFolder, setShowNewFolder] = useState(false)
@@ -86,9 +108,14 @@ export function FolderBrowser({ rootFolderId }: { rootFolderId: string }) {
   )
   const [dialog, setDialog] = useState<DialogState>({ type: 'idle' })
   const [dialogBusy, setDialogBusy] = useState(false)
+  const [dragActive, setDragActive] = useState(false)
+  const [uploadItems, setUploadItems] = useState<UploadProgressEvent[]>([])
+  const [folderOptions, setFolderOptions] = useState<FolderOption[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const retryInputRef = useRef<HTMLInputElement>(null)
+  const versionInputRef = useRef<HTMLInputElement>(null)
   const [retryFileId, setRetryFileId] = useState<string | null>(null)
+  const [versionFileId, setVersionFileId] = useState<string | null>(null)
   const request = useApiRequest()
 
   function openFolder(nextFolderId: string) {
@@ -105,17 +132,27 @@ export function FolderBrowser({ rootFolderId }: { rootFolderId: string }) {
   const renameFolder = useRenameFolder(folderId)
   const deleteFolder = useDeleteFolder(folderId)
   const moveFolder = useMoveFolder(folderId)
-  const uploadPdf = useUploadPdf(folderId)
+  const uploadPdfs = useUploadPdfs(folderId)
   const retryUpload = useRetryUpload(folderId)
+  const uploadNewVersion = useUploadNewVersion(folderId)
   const renameFile = useRenameFile(folderId)
   const deleteFile = useDeleteFile(folderId)
   const moveFile = useMoveFile(folderId)
   const openFile = useOpenFile()
+  const openFileVersion = useOpenFileVersion()
+  const versionsFileId = dialog.type === 'versions' ? dialog.file.id : null
+  const versions = useFileVersions(versionsFileId)
+
+  useEffect(() => {
+    void request<{ items: FolderOption[] }>(
+      `/data-rooms/${dataRoomId}/folder-options`,
+    )
+      .then((result) => setFolderOptions(result.items))
+      .catch(() => setFolderOptions([]))
+  }, [dataRoomId, request, contents.dataUpdatedAt])
 
   const canWrite = contents.data?.canWrite ?? false
   const breadcrumbs = contents.data?.breadcrumbs ?? []
-  const parentFolderId =
-    breadcrumbs.length > 1 ? breadcrumbs[breadcrumbs.length - 2]?.id : null
   const listedFolders = [
     ...(contents.data?.folders.items ?? []),
     ...extraFolders,
@@ -130,22 +167,11 @@ export function FolderBrowser({ rootFolderId }: { rootFolderId: string }) {
     [contents.data?.folder.name],
   )
 
-  const sharedMoveOptions = [
-    ...(parentFolderId
-      ? [
-          {
-            value: parentFolderId,
-            label: 'Parent folder',
-            description: 'Move one level up',
-          },
-        ]
-      : []),
-    ...listedFolders.map((item) => ({
-      value: item.id,
-      label: item.name,
-      description: 'Folder in this location',
-    })),
-  ]
+  const moveOptions = folderOptions.map((item) => ({
+    value: item.id,
+    label: item.pathLabel,
+    description: item.parentId ? 'Nested folder' : 'Root folder',
+  }))
 
   async function run(action: () => Promise<unknown>) {
     setError(null)
@@ -177,7 +203,7 @@ export function FolderBrowser({ rootFolderId }: { rootFolderId: string }) {
       const page = await request<FolderContentsResponse>(
         `/folders/${folderId}/contents?foldersCursor=${encodeURIComponent(nextFoldersCursor)}`,
       )
-      setExtraFolders((current) => [...current, ...page.folders.items])
+      setExtraFolders((prev) => [...prev, ...page.folders.items])
       setFoldersCursor(page.folders.nextCursor)
     })
   }
@@ -190,13 +216,62 @@ export function FolderBrowser({ rootFolderId }: { rootFolderId: string }) {
       const page = await request<FolderContentsResponse>(
         `/folders/${folderId}/contents?filesCursor=${encodeURIComponent(nextFilesCursor)}`,
       )
-      setExtraFiles((current) => [...current, ...page.files.items])
+      setExtraFiles((prev) => [...prev, ...page.files.items])
       setFilesCursor(page.files.nextCursor)
     })
   }
 
+  function queueUploads(fileList: FileList | File[]) {
+    const files = [...fileList].filter(isPdfFile)
+    if (files.length === 0) {
+      setError('Only PDF files can be uploaded.')
+      return
+    }
+    setUploadItems([])
+    void run(async () => {
+      await uploadPdfs.mutateAsync({
+        files,
+        onItemProgress: (event) => {
+          setUploadItems((prev) => {
+            const without = prev.filter((item) => item.localId !== event.localId)
+            return [...without, event]
+          })
+        },
+      })
+    })
+  }
+
   return (
-    <section className="surface-panel relative z-10 overflow-visible text-card-foreground">
+    <section
+      className={`overflow-hidden rounded-[1.25rem] border bg-surface/70 transition-colors ${
+        dragActive
+          ? 'border-primary ring-2 ring-primary/30'
+          : 'border-border/70'
+      }`}
+      onDragEnter={(event) => {
+        event.preventDefault()
+        if (canWrite) {
+          setDragActive(true)
+        }
+      }}
+      onDragOver={(event) => {
+        event.preventDefault()
+      }}
+      onDragLeave={(event) => {
+        event.preventDefault()
+        if (event.currentTarget === event.target) {
+          setDragActive(false)
+        }
+      }}
+      onDrop={(event) => {
+        event.preventDefault()
+        setDragActive(false)
+        if (!canWrite) {
+          return
+        }
+        queueUploads(event.dataTransfer.files)
+      }}
+    >
       <div className="border-b border-border/70 bg-surface/75 px-5 py-5 sm:px-7">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -246,26 +321,25 @@ export function FolderBrowser({ rootFolderId }: { rootFolderId: string }) {
               <Button
                 type="button"
                 size="sm"
-                disabled={uploadPdf.isPending}
+                disabled={uploadPdfs.isPending}
                 onClick={() => fileInputRef.current?.click()}
               >
                 <FileUp className="mr-1.5 h-4 w-4" aria-hidden="true" />
-                {uploadPdf.isPending ? 'Uploading…' : 'Upload PDF'}
+                {uploadPdfs.isPending ? 'Uploading…' : 'Upload PDFs'}
               </Button>
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="application/pdf,.pdf"
+                multiple
                 className="hidden"
                 onChange={(event) => {
-                  const file = event.target.files?.[0]
+                  const files = event.target.files
                   event.target.value = ''
-                  if (!file) {
+                  if (!files?.length) {
                     return
                   }
-                  void run(async () => {
-                    await uploadPdf.mutateAsync(file)
-                  })
+                  queueUploads(files)
                 }}
               />
               <input
@@ -286,9 +360,34 @@ export function FolderBrowser({ rootFolderId }: { rootFolderId: string }) {
                   })
                 }}
               />
+              <input
+                ref={versionInputRef}
+                type="file"
+                accept="application/pdf,.pdf"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0]
+                  const fileId = versionFileId
+                  event.target.value = ''
+                  setVersionFileId(null)
+                  if (!file || !fileId) {
+                    return
+                  }
+                  void run(async () => {
+                    await uploadNewVersion.mutateAsync({ fileId, file })
+                  })
+                }}
+              />
             </div>
           ) : null}
         </div>
+        {canWrite ? (
+          <p className="mt-3 text-xs text-muted-foreground">
+            Drag and drop one or more PDFs anywhere in this panel. Uploads go
+            directly to private S3 when CORS allows; otherwise they fall back
+            through the API.
+          </p>
+        ) : null}
       </div>
 
       {canWrite && showNewFolder ? (
@@ -326,6 +425,37 @@ export function FolderBrowser({ rootFolderId }: { rootFolderId: string }) {
             Cancel
           </Button>
         </form>
+      ) : null}
+
+      {uploadItems.length > 0 ? (
+        <ul className="space-y-2 border-b border-border/70 bg-accent/20 px-5 py-4 sm:px-7">
+          {uploadItems.map((item) => (
+            <li key={item.localId} className="text-sm">
+              <div className="mb-1 flex items-center justify-between gap-3">
+                <span className="truncate font-medium text-ink">
+                  {item.fileName}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {item.status === 'error'
+                    ? item.error ?? 'Failed'
+                    : item.status === 'done'
+                      ? 'Done'
+                      : `${item.progress}%`}
+                </span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-border/80">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    item.status === 'error' ? 'bg-[#9b2c2c]' : 'bg-primary'
+                  }`}
+                  style={{
+                    width: `${item.status === 'error' ? 100 : item.progress}%`,
+                  }}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
       ) : null}
 
       {error ? (
@@ -391,7 +521,7 @@ export function FolderBrowser({ rootFolderId }: { rootFolderId: string }) {
                         <MenuSelect
                           label="Move"
                           placeholder="Move folder to"
-                          options={sharedMoveOptions.filter(
+                          options={moveOptions.filter(
                             (option) => option.value !== folder.id,
                           )}
                           emptyMessage="No other folders to move into"
@@ -404,6 +534,17 @@ export function FolderBrowser({ rootFolderId }: { rootFolderId: string }) {
                             })
                           }}
                         />
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            setDialog({ type: 'share-folder', folder })
+                          }
+                        >
+                          <Share2 className="mr-1 h-3.5 w-3.5" />
+                          Share
+                        </Button>
                         <Button
                           type="button"
                           size="sm"
@@ -462,7 +603,7 @@ export function FolderBrowser({ rootFolderId }: { rootFolderId: string }) {
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {canWrite
-                    ? 'Use “Upload PDF” above to add the first document.'
+                    ? 'Upload or drop PDFs above to add the first document.'
                     : 'The owner has not added documents to this folder.'}
                 </p>
               </div>
@@ -487,8 +628,8 @@ export function FolderBrowser({ rootFolderId }: { rootFolderId: string }) {
                               : 'text-muted-foreground'
                           }`}
                         >
-                          {fileStatusLabel(file.status)} ·{' '}
-                          {formatBytes(file.size)}
+                          {fileStatusLabel(file.status)} · v
+                          {file.currentVersion ?? 1} · {formatBytes(file.size)}
                         </p>
                       </div>
                     </div>
@@ -531,7 +672,7 @@ export function FolderBrowser({ rootFolderId }: { rootFolderId: string }) {
                           <MenuSelect
                             label="Move"
                             placeholder="Move file to"
-                            options={sharedMoveOptions}
+                            options={moveOptions}
                             emptyMessage="Create a folder first"
                             onSelect={(targetFolderId) => {
                               void run(async () => {
@@ -542,6 +683,39 @@ export function FolderBrowser({ rootFolderId }: { rootFolderId: string }) {
                               })
                             }}
                           />
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              setDialog({ type: 'share-file', file })
+                            }
+                          >
+                            <Share2 className="mr-1 h-3.5 w-3.5" />
+                            Share
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              setDialog({ type: 'versions', file })
+                            }
+                          >
+                            Versions
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={uploadNewVersion.isPending}
+                            onClick={() => {
+                              setVersionFileId(file.id)
+                              versionInputRef.current?.click()
+                            }}
+                          >
+                            New version
+                          </Button>
                           <Button
                             type="button"
                             size="sm"
@@ -636,7 +810,7 @@ export function FolderBrowser({ rootFolderId }: { rootFolderId: string }) {
         title="Delete folder?"
         description={
           dialog.type === 'delete-folder'
-            ? `Delete “${dialog.folder.name}” and everything inside it? This cannot be undone.`
+            ? `Delete “${dialog.folder.name}” and everything inside it? Nested folders, files, and share links will be removed. This cannot be undone.`
             : ''
         }
         confirmLabel="Delete folder"
@@ -680,7 +854,7 @@ export function FolderBrowser({ rootFolderId }: { rootFolderId: string }) {
         title="Delete document?"
         description={
           dialog.type === 'delete-file'
-            ? `Delete “${dialog.file.name}”? The file will be removed from storage.`
+            ? `Delete “${dialog.file.name}”? The file and its versions will be removed from storage.`
             : ''
         }
         confirmLabel="Delete file"
@@ -696,6 +870,96 @@ export function FolderBrowser({ rootFolderId }: { rootFolderId: string }) {
           })
         }}
       />
+
+      <Dialog
+        open={dialog.type === 'share-folder' || dialog.type === 'share-file'}
+        className="max-w-2xl"
+        title={
+          dialog.type === 'share-folder'
+            ? `Share folder “${dialog.folder.name}”`
+            : dialog.type === 'share-file'
+              ? `Share file “${dialog.file.name}”`
+              : 'Share'
+        }
+        description="Invite a teammate or create a read-only public link. Email invites require the person to have signed in to Vault once first."
+        onClose={() => setDialog({ type: 'idle' })}
+      >
+        {dialog.type === 'share-folder' ? (
+          <SharePanel
+            resourceType="FOLDER"
+            resourceId={dialog.folder.id}
+            title="Folder access"
+          />
+        ) : null}
+        {dialog.type === 'share-file' ? (
+          <SharePanel
+            resourceType="FILE"
+            resourceId={dialog.file.id}
+            title="File access"
+          />
+        ) : null}
+      </Dialog>
+
+      <Dialog
+        open={dialog.type === 'versions'}
+        title={
+          dialog.type === 'versions'
+            ? `Versions · ${dialog.file.name}`
+            : 'Versions'
+        }
+        description="Open any previous version. Uploading a new version keeps history."
+        onClose={() => setDialog({ type: 'idle' })}
+      >
+        {versions.isPending ? (
+          <p className="text-sm text-muted-foreground">Loading versions…</p>
+        ) : null}
+        {versions.isError ? (
+          <p className="text-sm text-[#9b2c2c]">Could not load versions.</p>
+        ) : null}
+        <ul className="divide-y divide-border/70 overflow-hidden rounded-xl border border-border/80">
+          {(versions.data?.items ?? []).map((version) => (
+            <li
+              key={version.id}
+              className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div className="text-sm">
+                <p className="font-medium text-ink">
+                  Version {version.version}
+                  {version.isCurrent ? ' (current)' : ''}
+                </p>
+                <p className="text-muted-foreground">
+                  {formatBytes(version.size)} ·{' '}
+                  {new Date(version.createdAt).toLocaleString()}
+                </p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={openFileVersion.isPending}
+                onClick={() => {
+                  if (dialog.type !== 'versions') {
+                    return
+                  }
+                  void run(async () => {
+                    const result = await openFileVersion.mutateAsync({
+                      fileId: dialog.file.id,
+                      versionId: version.id,
+                    })
+                    setPreview({
+                      url: result.url,
+                      title: `${dialog.file.name} · v${version.version}`,
+                    })
+                    setDialog({ type: 'idle' })
+                  })
+                }}
+              >
+                Open
+              </Button>
+            </li>
+          ))}
+        </ul>
+      </Dialog>
     </section>
   )
 }

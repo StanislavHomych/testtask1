@@ -40,11 +40,31 @@ export interface FileSummary {
   size: string
   folderId: string
   status?: FileStatus
+  currentVersion?: number
   createdAt?: string
   updatedAt?: string
   dataRoomId?: string
   originalName?: string
   viewUrl?: string
+}
+
+export interface FileVersionSummary {
+  id: string
+  fileId: string
+  version: number
+  name: string
+  originalName: string
+  mimeType: string
+  size: string
+  createdAt: string
+  isCurrent: boolean
+}
+
+export interface FolderOption {
+  id: string
+  name: string
+  parentId: string | null
+  pathLabel: string
 }
 
 export interface CursorPageInfo {
@@ -98,8 +118,8 @@ export interface SharedResourceResponse {
   }
   folder: FolderSummary | null
   breadcrumbs: Array<{ id: string; name: string }>
-  folders: FolderSummary[]
-  files: FileSummary[]
+  folders: { items: FolderSummary[] } & CursorPageInfo
+  files: { items: FileSummary[] } & CursorPageInfo
   file: FileSummary | null
   viewUrl: string | null
   expiresInSeconds?: number

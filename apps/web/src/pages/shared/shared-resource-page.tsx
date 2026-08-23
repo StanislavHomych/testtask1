@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { PageShell } from '@/components/layout/page-shell'
 import { PdfPreview } from '@/components/pdf-preview'
@@ -7,6 +7,8 @@ import {
   useSharedFileViewUrl,
   useSharedResource,
 } from '@/features/sharing/use-sharing'
+import { apiRequest } from '@/lib/api/api-client'
+import type { SharedResourceResponse } from '@/types/domain'
 
 function formatBytes(size: string): string {
   const value = Number(size)
@@ -29,6 +31,26 @@ export function SharedResourcePage() {
   const shared = useSharedResource(token, folderId)
   const [previewFileId, setPreviewFileId] = useState<string | null>(null)
   const fileView = useSharedFileViewUrl(token, previewFileId)
+  const [extraFolders, setExtraFolders] = useState<
+    SharedResourceResponse['folders']['items']
+  >([])
+  const [extraFiles, setExtraFiles] = useState<
+    SharedResourceResponse['files']['items']
+  >([])
+  const [foldersCursor, setFoldersCursor] = useState<string | null>(null)
+  const [filesCursor, setFilesCursor] = useState<string | null>(null)
+
+  const listedFolders = useMemo(
+    () => [...(shared.data?.folders.items ?? []), ...extraFolders],
+    [shared.data?.folders.items, extraFolders],
+  )
+  const listedFiles = useMemo(
+    () => [...(shared.data?.files.items ?? []), ...extraFiles],
+    [shared.data?.files.items, extraFiles],
+  )
+  const nextFoldersCursor =
+    foldersCursor ?? shared.data?.folders.nextCursor ?? null
+  const nextFilesCursor = filesCursor ?? shared.data?.files.nextCursor ?? null
 
   if (!token) {
     return (
@@ -62,27 +84,64 @@ export function SharedResourcePage() {
     )
   }
 
-  const data = shared.data
+  const pageData = shared.data
   const singleFileViewUrl =
-    data.file && data.viewUrl ? data.viewUrl : fileView.data?.url
-  const singleFile = data.file ?? fileView.data?.file ?? null
+    pageData.file && pageData.viewUrl ? pageData.viewUrl : fileView.data?.url
+  const singleFile = pageData.file ?? fileView.data?.file ?? null
+
+  async function loadMore(kind: 'folders' | 'files') {
+    if (!token) {
+      return
+    }
+    const cursor = kind === 'folders' ? nextFoldersCursor : nextFilesCursor
+    if (!cursor) {
+      return
+    }
+    const params = new URLSearchParams()
+    if (folderId) {
+      params.set('folderId', folderId)
+    }
+    if (kind === 'folders') {
+      params.set('foldersCursor', cursor)
+    } else {
+      params.set('filesCursor', cursor)
+    }
+    const page = await apiRequest<SharedResourceResponse>(
+      `/shared/${token}?${params.toString()}`,
+    )
+    if (kind === 'folders') {
+      setExtraFolders((prev) => [...prev, ...page.folders.items])
+      setFoldersCursor(page.folders.nextCursor)
+    } else {
+      setExtraFiles((prev) => [...prev, ...page.files.items])
+      setFilesCursor(page.files.nextCursor)
+    }
+  }
+
+  function resetPaging() {
+    setExtraFolders([])
+    setExtraFiles([])
+    setFoldersCursor(null)
+    setFilesCursor(null)
+    setPreviewFileId(null)
+  }
 
   return (
     <PageShell
-      title={singleFile?.name ?? data.folder?.name ?? data.dataRoom.name}
+      title={singleFile?.name ?? pageData.folder?.name ?? pageData.dataRoom.name}
       description="Read-only shared access"
     >
-      {data.breadcrumbs.length > 0 ? (
+      {pageData.breadcrumbs.length > 0 ? (
         <nav className="mb-6 flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
-          {data.breadcrumbs.map((crumb, index) => (
+          {pageData.breadcrumbs.map((crumb, index) => (
             <span key={crumb.id} className="inline-flex items-center gap-1">
               {index > 0 ? <span className="opacity-40">/</span> : null}
               <button
                 type="button"
                 className="rounded-md px-1 font-medium transition-colors hover:bg-accent hover:text-ink"
                 onClick={() => {
-                  setPreviewFileId(null)
-                  const rootId = data.breadcrumbs[0]?.id
+                  resetPaging()
+                  const rootId = pageData.breadcrumbs[0]?.id
                   if (crumb.id === rootId) {
                     setSearchParams({})
                     return
@@ -126,17 +185,17 @@ export function SharedResourcePage() {
               <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                 Folders
               </h2>
-              {data.folders.length === 0 ? (
+              {listedFolders.length === 0 ? (
                 <p className="mt-3 text-sm text-muted-foreground">No folders.</p>
               ) : (
                 <ul className="mt-3 divide-y divide-border/70 overflow-hidden rounded-2xl border border-border/80 bg-surface/60">
-                  {data.folders.map((folder) => (
+                  {listedFolders.map((folder) => (
                     <li key={folder.id} className="px-4 py-3.5">
                       <button
                         type="button"
                         className="flex items-center gap-3 font-medium text-ink hover:underline"
                         onClick={() => {
-                          setPreviewFileId(null)
+                          resetPaging()
                           setSearchParams({ folderId: folder.id })
                         }}
                       >
@@ -149,16 +208,29 @@ export function SharedResourcePage() {
                   ))}
                 </ul>
               )}
+              {nextFoldersCursor ? (
+                <Button
+                  className="mt-3"
+                  type="button"
+                  size="sm"
+                  variant="soft"
+                  onClick={() => {
+                    void loadMore('folders')
+                  }}
+                >
+                  Load more folders
+                </Button>
+              ) : null}
             </div>
             <div>
               <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                 Files
               </h2>
-              {data.files.length === 0 ? (
+              {listedFiles.length === 0 ? (
                 <p className="mt-3 text-sm text-muted-foreground">No files.</p>
               ) : (
                 <ul className="mt-3 divide-y divide-border/70 overflow-hidden rounded-2xl border border-border/80 bg-surface/60">
-                  {data.files.map((file) => (
+                  {listedFiles.map((file) => (
                     <li
                       key={file.id}
                       className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between"
@@ -186,6 +258,19 @@ export function SharedResourcePage() {
                   ))}
                 </ul>
               )}
+              {nextFilesCursor ? (
+                <Button
+                  className="mt-3"
+                  type="button"
+                  size="sm"
+                  variant="soft"
+                  onClick={() => {
+                    void loadMore('files')
+                  }}
+                >
+                  Load more files
+                </Button>
+              ) : null}
             </div>
             {fileView.isError ? (
               <p className="text-sm text-[#9b2c2c]">

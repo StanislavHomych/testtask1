@@ -24,6 +24,7 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { DataRoomsService } from './data-rooms.service';
 import { CreateDataRoomDto } from './dto/create-data-room.dto';
 import { ListDataRoomsDto } from './dto/list-data-rooms.dto';
+import { SearchDataRoomDto } from './dto/search-data-room.dto';
 import { UpdateDataRoomDto } from './dto/update-data-room.dto';
 
 @ApiTags('data-rooms')
@@ -50,6 +51,27 @@ export class DataRoomsController {
     @Body() dto: CreateDataRoomDto,
   ) {
     return this.dataRoomsService.create(user.clerkUserId, dto);
+  }
+
+  @Get(':id/search')
+  @ApiOperation({ summary: 'Search files in a data room by filename' })
+  search(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: SearchDataRoomDto,
+  ) {
+    return this.dataRoomsService.search(user.clerkUserId, id, query);
+  }
+
+  @Get(':id/folder-options')
+  @ApiOperation({
+    summary: 'List all folders in a data room for move/share pickers',
+  })
+  listFolderOptions(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.dataRoomsService.listFolderOptions(user.clerkUserId, id);
   }
 
   @Get(':id')

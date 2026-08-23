@@ -40,10 +40,11 @@ model User {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  ownedDataRooms DataRoom[] @relation("DataRoomOwner")
-  uploadedFiles  File[]     @relation("FileUploader")
-  receivedShares Share[]    @relation("ShareRecipient")
-  createdShares  Share[]    @relation("ShareCreator")
+  ownedDataRooms DataRoom[]    @relation("DataRoomOwner")
+  uploadedFiles  File[]        @relation("FileUploader")
+  fileVersions   FileVersion[] @relation("FileVersionUploader")
+  receivedShares Share[]       @relation("ShareRecipient")
+  createdShares  Share[]       @relation("ShareCreator")
 
   @@index([email])
 }
@@ -87,26 +88,49 @@ model Folder {
 }
 
 model File {
-  id           String     @id @default(uuid()) @db.Uuid
-  name         String
-  nameKey      String
-  originalName String
-  mimeType     String
-  size         BigInt
-  storageKey   String     @unique
-  folderId     String     @db.Uuid
-  uploadedById String     @db.Uuid
-  status       FileStatus @default(PENDING_UPLOAD)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  deletedAt    DateTime?
+  id             String     @id @default(uuid()) @db.Uuid
+  name           String
+  nameKey        String
+  originalName   String
+  mimeType       String
+  size           BigInt
+  storageKey     String     @unique
+  folderId       String     @db.Uuid
+  uploadedById   String     @db.Uuid
+  currentVersion Int        @default(1)
+  status         FileStatus @default(PENDING_UPLOAD)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  deletedAt      DateTime?
 
-  folder     Folder  @relation(fields: [folderId], references: [id], onDelete: Restrict)
-  uploadedBy User    @relation("FileUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
-  shares     Share[] @relation("SharedFile")
+  folder     Folder        @relation(fields: [folderId], references: [id], onDelete: Restrict)
+  uploadedBy User          @relation("FileUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+  shares     Share[]       @relation("SharedFile")
+  versions   FileVersion[]
 
   @@unique([folderId, nameKey])
   @@index([folderId, status, nameKey, id])
+  @@index([folderId, status, name])
+  @@index([uploadedById])
+}
+
+model FileVersion {
+  id           String   @id @default(uuid()) @db.Uuid
+  fileId       String   @db.Uuid
+  version      Int
+  name         String
+  originalName String
+  mimeType     String
+  size         BigInt
+  storageKey   String   @unique
+  uploadedById String   @db.Uuid
+  createdAt    DateTime @default(now())
+
+  file       File @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  uploadedBy User @relation("FileVersionUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+
+  @@unique([fileId, version])
+  @@index([fileId, version])
   @@index([uploadedById])
 }
 

@@ -171,6 +171,28 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async getObjectPrefix(
+    objectKey: string,
+    byteLength = 5,
+  ): Promise<Buffer | null> {
+    try {
+      const result = await this.client.send(
+        new GetObjectCommand({
+          Bucket: this.bucket,
+          Key: objectKey,
+          Range: `bytes=0-${Math.max(0, byteLength - 1)}`,
+        }),
+      );
+      if (!result.Body) {
+        return null;
+      }
+      const bytes = await result.Body.transformToByteArray();
+      return Buffer.from(bytes);
+    } catch {
+      return null;
+    }
+  }
+
   async deleteObject(objectKey: string): Promise<void> {
     await this.client.send(
       new DeleteObjectCommand({
@@ -178,5 +200,22 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
         Key: objectKey,
       }),
     );
+  }
+
+  async deleteObjectsBestEffort(objectKeys: string[]): Promise<void> {
+    const unique = [...new Set(objectKeys.filter(Boolean))];
+    const batchSize = 25;
+    for (let i = 0; i < unique.length; i += batchSize) {
+      const batch = unique.slice(i, i + batchSize);
+      await Promise.allSettled(
+        batch.map(async (key) => {
+          try {
+            await this.deleteObject(key);
+          } catch {
+            // Soft-deleted metadata remains authoritative; orphan cleanup can retry.
+          }
+        }),
+      );
+    }
   }
 }

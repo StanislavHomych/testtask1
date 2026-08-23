@@ -51,6 +51,7 @@ export interface FileListItem {
   size: string;
   folderId: string;
   status: string;
+  currentVersion: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -254,6 +255,10 @@ export class FoldersService {
           notIn: [FileStatus.DELETED, FileStatus.DELETING],
         },
       },
+      select: { id: true, storageKey: true },
+    });
+    const versionKeys = await this.prisma.fileVersion.findMany({
+      where: { fileId: { in: storageKeys.map((row) => row.id) } },
       select: { storageKey: true },
     });
 
@@ -310,9 +315,10 @@ export class FoldersService {
       });
     });
 
-    await this.deleteStorageKeysBestEffort(
-      storageKeys.map((row) => row.storageKey),
-    );
+    await this.storage.deleteObjectsBestEffort([
+      ...storageKeys.map((row) => row.storageKey),
+      ...versionKeys.map((row) => row.storageKey),
+    ]);
   }
 
   private async listChildFolders(
@@ -401,6 +407,7 @@ export class FoldersService {
         size: row.size.toString(),
         folderId: row.folderId,
         status: row.status,
+        currentVersion: row.currentVersion,
         createdAt: row.createdAt.toISOString(),
         updatedAt: row.updatedAt.toISOString(),
       })),
@@ -460,13 +467,7 @@ export class FoldersService {
   }
 
   private async deleteStorageKeysBestEffort(keys: string[]): Promise<void> {
-    for (const key of keys) {
-      try {
-        await this.storage.deleteObject(key);
-      } catch {
-        // Soft-deleted metadata remains authoritative; orphan cleanup can retry.
-      }
-    }
+    await this.storage.deleteObjectsBestEffort(keys);
   }
 
   private async assertCanWriteFolder(

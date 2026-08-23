@@ -15,7 +15,7 @@ React / Vite / Clerk
   → NestJS REST API
       → domain modules (users, data rooms, folders, files, sharing)
       → Prisma → Neon / PostgreSQL
-      → AWS SDK v3 → S3 (presigned upload & view)
+      → AWS SDK v3 → S3 (presigned upload & view; API proxy fallback)
 ```
 
 Clerk verifies identity. Nest maps the JWT subject to a local `User`. Postgres
@@ -28,7 +28,7 @@ thin; services own business rules and authorization.
 - NestJS, class-validator DTOs, env validation, Helmet, rate limiting, OpenAPI
 - Prisma 7 + PostgreSQL
 - Clerk (email/password + Google)
-- AWS S3 for PDF blobs
+- AWS S3 for PDF blobs (with file version history)
 
 ## Local setup
 
@@ -47,6 +47,7 @@ npm run prisma:migrate
 Fill in Clerk + AWS credentials, then:
 
 ```bash
+npm run storage:cors --workspace api   # once, if IAM allows PutBucketCORS
 npm run dev          # API + web together
 # or separately:
 npm run dev:api      # http://localhost:3000/api
@@ -101,38 +102,50 @@ npm run prisma:migrate
 
 ## S3
 
-Create a **private** bucket and configure credentials in `apps/api/.env`.
+Create a **private** bucket (Block Public Access on) and configure credentials
+in `apps/api/.env`.
 
 ```bash
 npm run storage:verify --workspace api
+npm run storage:cors --workspace api
 ```
 
 IAM for the app user: `s3:ListBucket` on the bucket; `s3:GetObject`,
 `s3:PutObject`, `s3:DeleteObject`, `s3:HeadObject` on
-`arn:aws:s3:::BUCKET/data-rooms/*`.
+`arn:aws:s3:::BUCKET/data-rooms/*`. Optional admin once: `s3:PutBucketCORS`.
 
-Browser uploads need bucket CORS (often set once in the AWS Console):
+Browser uploads need bucket CORS for the frontend origin:
 
 ```json
 [
   {
     "AllowedHeaders": ["*"],
     "AllowedMethods": ["GET", "PUT", "HEAD"],
-    "AllowedOrigins": ["http://localhost:5173", "http://127.0.0.1:5173"],
+    "AllowedOrigins": ["http://localhost:5173", "https://your-frontend.example"],
     "ExposeHeaders": ["ETag", "Content-Length", "Content-Type"],
     "MaxAgeSeconds": 3000
   }
 ]
 ```
 
-Object keys: `data-rooms/{dataRoomId}/files/{fileId}`. Uploads go
-browser → S3 via short-lived presigned URLs. Nest does not proxy PDF bodies.
+Object keys: `data-rooms/{dataRoomId}/files/{fileId}` (versions append
+`.v{n}.{uuid}`). Preferred upload path:
+
+1. Frontend requests `POST /files/upload-url`
+2. Nest authorizes and returns a short-lived presigned PUT URL
+3. Browser uploads directly to S3 (progress via XHR)
+4. Frontend calls `POST /files/:id/complete` (magic-byte + size checks)
+5. If browser→S3 CORS fails, the client falls back to `PUT /files/:id/content`
+
+Multi-file and drag-and-drop uploads are supported in the folder UI.
 
 ## Clerk
 
-Enable email/password and Google. Allow `http://localhost:5173` as an origin.
+Enable email/password and Google. Allow your frontend origin(s).
 Copy the publishable key to both web and API; keep the secret key on the API
 only. After first sign-in, `GET /api/users/me` upserts the local `User`.
+
+Email sharing requires the recipient to have signed in once (local User row).
 
 ## Project structure
 
@@ -152,6 +165,7 @@ erDiagram
   DataRoom ||--o{ Folder : contains
   Folder ||--o{ Folder : parent
   Folder ||--o{ File : contains
+  File ||--o{ FileVersion : versions
   User ||--o{ File : uploads
   User ||--o{ Share : receives
   User ||--o{ Share : creates
@@ -162,7 +176,7 @@ erDiagram
 
 - One owner per data room
 - Unlimited folder nesting via `parentId`
-- Files store metadata + S3 key only
+- Files store metadata + S3 key; `FileVersion` keeps prior blobs
 - Shares target exactly one resource and one audience (user **or** public token)
 - `nameKey` enforces deterministic sibling uniqueness (`name (n)` / `name (n).pdf`)
 - Public tokens: raw token shown once; SHA-256 digest stored
@@ -189,17 +203,21 @@ unless `ENABLE_SWAGGER=true`.
 - `GET /api`, `GET /api/health`
 - `GET /api/users/me`
 - `GET/POST /api/data-rooms`, `GET/PATCH/DELETE /api/data-rooms/:id`
+- `GET /api/data-rooms/:id/search`, `GET /api/data-rooms/:id/folder-options`
 - `GET /api/folders/:id`, `GET /api/folders/:id/contents`
 - `POST /api/folders/:id/folders`, `PATCH/DELETE /api/folders/:id`
 - `POST /api/folders/:id/move`
 - `POST /api/files/upload-url`, `POST /api/files/:id/complete`
+- `PUT /api/files/:id/content` (CORS fallback)
 - `GET /api/files/:id`, `GET /api/files/:id/view-url`
 - `PATCH/DELETE /api/files/:id`, `POST /api/files/:id/move`
+- `GET/POST /api/files/:id/versions*`, `PUT /api/files/:id/versions/content`
 - `POST/GET /api/shares`, `DELETE /api/shares/:id`
-- `GET /api/shared/:token?folderId=`
+- `GET /api/shared/:token?folderId=&foldersCursor=&filesCursor=`
 - `GET /api/shared/:token/files/:fileId/view-url`
 
 Listings are cursor-paginated one level at a time — never a full tree.
+Public share listings use the same cursor model.
 
 ## Testing
 
@@ -212,15 +230,48 @@ npm run playwright:install
 ## Scaling (100k+ files)
 
 - Cursor pagination; one-level lists + breadcrumbs
-- Compound indexes on folder/file listings
-- Subtree size/count via recursive CTE first; aggregates/closure table later
-- Background jobs for large deletes and S3 orphan reconciliation
-- Multipart upload when sizes justify it
+- Compound indexes on folder/file listings (+ filename search index)
+- **Subtree size / item count:** recursive CTE on `Folder`/`File` for a given
+  root, or maintain denormalized aggregates / a closure table later
+- At 100k files: keep one-level cursor lists, never load the whole tree,
+  use background jobs for large deletes and S3 orphan reconciliation,
+  multipart upload when sizes justify it
+- Indexes already cover `ownerId`, `parentId`, `folderId`, `dataRoomId`, shares
 - `EDITOR` is already in the schema — widen policies without remodeling
 
-## Known MVP limits (say aloud in demos)
+## Deployment
 
-- Single-file upload UI (no multi-select / drag-drop progress yet)
+Typical production layout:
+
+| Piece | Suggested host |
+| --- | --- |
+| Web | Vercel (`apps/web`, SPA rewrites in `vercel.json`) |
+| API | Render / Railway / Fly (`apps/api`, `npm run start:prod`) |
+| DB | Neon |
+| Blobs | Private S3 bucket |
+
+Checklist:
+
+1. Set production env vars on API + web (`FRONTEND_URL`, `API_URL`,
+   `VITE_API_URL`, Clerk + AWS + `DATABASE_URL`).
+2. Allow the production frontend origin in Clerk and S3 CORS.
+3. Run migrations against Neon.
+4. Deploy API, then web pointing `VITE_API_URL` at the API.
+5. Confirm `/api/health`, sign-in, upload, and a public share link.
+
+Example public URLs (replace with yours):
+
+- Frontend: `https://testtask1-web.vercel.app`
+- API: `https://your-api.onrender.com/api`
+
+## Known MVP limits
+
 - Email share requires the recipient to have signed in once
-- File-level share is API-ready; UI exposes room/folder sharing
-- No public production deploy in this repo by default
+- EDITOR role exists in the schema but is not assigned by the MVP UI
+- Production “publicly accessible” checklist items depend on your live Vercel/Render URLs and env; local + documented deploy path are in place
+
+## AI usage note
+
+Cursor was used for scaffolding and implementation assistance. Human review
+covered Prisma constraints, authorization inheritance, S3 key layout, CORS vs
+app IAM, upload fallback behavior, sharing scope, and production env wiring.
