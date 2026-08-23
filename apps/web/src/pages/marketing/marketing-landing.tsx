@@ -17,7 +17,7 @@ const FAQ_ITEMS = [
   {
     question: 'How are files stored?',
     answer:
-      'PDF binaries live in a private S3 bucket. Vault stores metadata in PostgreSQL. The browser uploads directly to S3 via short-lived presigned URLs when CORS allows; if CORS is blocked, the API accepts the bytes as a fallback and still stores them in S3.',
+      'Documents are stored in private cloud storage. Vault keeps only metadata and access rules, and opens files through short-lived secure links.',
   },
   {
     question: 'Can I revoke access later?',

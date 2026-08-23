@@ -381,13 +381,6 @@ export function FolderBrowser({
             </div>
           ) : null}
         </div>
-        {canWrite ? (
-          <p className="mt-3 text-xs text-muted-foreground">
-            Drag and drop one or more PDFs anywhere in this panel. Uploads go
-            directly to private S3 when CORS allows; otherwise they fall back
-            through the API.
-          </p>
-        ) : null}
       </div>
 
       {canWrite && showNewFolder ? (
